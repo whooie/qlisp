@@ -1,0 +1,46 @@
+[[bin]]
+path = "src/risp.rs"
+name = "risp"
+
+[[bin]]
+path = "src/q.rs"
+name = "q"
+
+[package]
+name = "q"
+version = "0.1.0"
+authors = [ "whooie <wcwhuie@gmail.com>",]
+edition = "2021"
+
+[dependencies]
+# itertools = "*"
+# rand = "*"
+# statrs = "*"
+num-complex = "*"
+num-traits = "*"
+# ndarray = "*"
+# ndarray-npy = "*"
+# scilib = "*"
+# rustfft = "*"
+# ndrustfft = "*"
+# rmpfit = "*"
+# wigner-symbols = "*"
+# uom = "*"
+# thiserror = "*"
+# anyhow = "*"
+
+[lib]
+path = "lib/lib.rs"
+name = "lib"
+
+# [dependencies.ndarray-linalg]
+# version = "*"
+# features = [ "openblas",]
+
+# [dependencies.whooie]
+# path = "/home/whooie/Documents/templates/rust/whooie"
+# features = [ "nd", "ndarray", "math", "plotting", "pyo3",]
+
+[profile.release]
+lto = true
+panic = "abort"
