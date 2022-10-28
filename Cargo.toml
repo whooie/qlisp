@@ -1,6 +1,6 @@
-[[bin]]
-path = "src/risp.rs"
-name = "risp"
+# [[bin]]
+# path = "src/risp.rs"
+# name = "risp"
 
 [[bin]]
 path = "src/q.rs"
@@ -28,10 +28,12 @@ num-traits = "*"
 # uom = "*"
 # thiserror = "*"
 # anyhow = "*"
+reedline = "*"
+clap = "*"
 
 [lib]
 path = "lib/lib.rs"
-name = "lib"
+name = "qlang"
 
 # [dependencies.ndarray-linalg]
 # version = "*"
