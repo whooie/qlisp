@@ -7,7 +7,7 @@ path = "src/q.rs"
 name = "q"
 
 [package]
-name = "q"
+name = "qlisp"
 version = "0.1.0"
 authors = [ "whooie <wcwhuie@gmail.com>",]
 edition = "2021"
@@ -16,8 +16,8 @@ edition = "2021"
 # itertools = "*"
 # rand = "*"
 # statrs = "*"
-num-complex = "*"
-num-traits = "*"
+num-complex = "0.4.2"
+num-traits = "0.2.15"
 # ndarray = "*"
 # ndarray-npy = "*"
 # scilib = "*"
@@ -28,12 +28,13 @@ num-traits = "*"
 # uom = "*"
 # thiserror = "*"
 # anyhow = "*"
-reedline = "*"
-clap = "*"
+reedline = "0.14.0"
+clap = "4.0.26"
+formatx = "0.1.4"
 
 [lib]
 path = "lib/lib.rs"
-name = "qlang"
+name = "qlisp"
 
 # [dependencies.ndarray-linalg]
 # version = "*"

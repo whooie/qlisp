@@ -1,15 +1,9 @@
 use std::borrow::Cow;
 use reedline as reed;
 use crate::{
-    qerr,
-    qbool,
-    qint,
-    qfloat,
-    qcomplex,
     qlist,
+    qstr,
     qsymbol,
-    qfunc,
-    qlambda,
     lang::{
         QResult,
         QErr,
@@ -33,10 +27,18 @@ enum ReplOut {
 }
 
 impl ReplOut {
+    fn as_print(exp: QExp) -> Self { Self::Print(exp) }
+
+    fn as_noprint(exp: QExp) -> Self { Self::NoPrint(exp) }
+
     fn unpack(self) -> QExp {
         return match self {
             ReplOut::Print(exp) => {
-                println_flush!("{}", exp);
+                if let qstr!(s) = &exp {
+                    println_flush!("\"{}\"", s);
+                } else {
+                    println_flush!("{}", exp);
+                }
                 exp
             },
             ReplOut::NoPrint(exp) => exp,
@@ -67,16 +69,6 @@ impl ReplOut {
 trait ReplEnv {
     fn repl_eval(&mut self, exp: &QExp) -> QResult<ReplOut>;
 
-    fn repl_eval_forms(&mut self, arg_forms: &[QExp]) -> QResult<Vec<ReplOut>>;
-
-    fn repl_eval_if_args(&mut self, arg_forms: &[QExp]) -> QResult<ReplOut>;
-
-    fn repl_eval_def_args(&mut self, arg_forms: &[QExp]) -> QResult<ReplOut>;
-
-    fn repl_eval_fn_args(&mut self, arg_forms: &[QExp]) -> QResult<ReplOut>;
-
-    fn repl_eval_defn_args(&mut self, arg_forms: &[QExp]) -> QResult<ReplOut>;
-
     fn repl_eval_builtin(&mut self, exp: &QExp, arg_forms: &[QExp])
         -> Option<QResult<ReplOut>>;
 
@@ -86,79 +78,18 @@ trait ReplEnv {
 impl<'a> ReplEnv for QEnv<'a> {
     fn repl_eval(&mut self, exp: &QExp) -> QResult<ReplOut> {
         return match exp {
-            qbool!(_) | qint!(_) | qfloat!(_) | qcomplex!(_)
-                => Ok(ReplOut::Print(exp.clone())),
             qlist!(list) => {
-                let first_form: &QExp = match list.first() {
-                    Some(exp) => exp,
-                    None => { return Ok(ReplOut::Print(exp.clone())); },
-                };
-                let arg_forms: &[QExp] = &list[1..];
-                match self.repl_eval_builtin(first_form, arg_forms) {
-                    Some(res) => res,
-                    None => {
-                        let first_eval: QExp = self.eval(first_form)?;
-                        match first_eval {
-                            qfunc!(f) => {
-                                f(&self.eval_forms(arg_forms)?)
-                                    .map(|qexp| ReplOut::Print(qexp))
-                            },
-                            qlambda!(ll) => {
-                                let mut ll_env: QEnv
-                                    = ll.env(arg_forms, self)?;
-                                ll_env.repl_eval(ll.get_body_exp())
-                            },
-                            qsymbol!(s) => Err(
-                                QErr::Reason(
-                                    format!("could not eval symbol {}", s)
-                                )
-                            ),
-                            _ => Ok(
-                                ReplOut::Print(qlist!(self.eval_forms(list)?))
-                            ),
-                        }
+                if let Some(first_form) = list.first() {
+                    match self.repl_eval_builtin(first_form, &list[1..]) {
+                        Some(res) => res,
+                        None => self.eval(exp).map(|qexp| ReplOut::Print(qexp))
                     }
+                } else {
+                    self.eval(exp).map(|qexp| ReplOut::Print(qexp))
                 }
             },
-            qsymbol!(k)
-                => self.get(k)
-                .ok_or(QErr::Reason(format!("symbol '{}' is undefined", k)))
-                .map(|qexp| ReplOut::Print(qexp)),
-            qfunc!(_) => Err(qerr!("encountered unexpected function")),
-            qlambda!(_) => Err(qerr!("encountered unexpected lambda")),
+            _ => self.eval(exp).map(|qexp| ReplOut::Print(qexp)),
         };
-    }
-
-    // fn repl_eval(&mut self, exp: &QExp) -> QResult<ReplOut> {
-    //     return self.eval(exp)
-    //         .map(|qexp| ReplOut::Print(qexp));
-    // }
-
-    fn repl_eval_forms(&mut self, arg_forms: &[QExp]) -> QResult<Vec<ReplOut>> {
-        return self.eval_forms(arg_forms)
-            .map(|qexps| {
-                qexps.into_iter().map(|qexp| ReplOut::Print(qexp)).collect()
-            });
-    }
-
-    fn repl_eval_if_args(&mut self, arg_forms: &[QExp]) -> QResult<ReplOut> {
-        return self.eval_if_args(arg_forms)
-            .map(|qexp| ReplOut::Print(qexp));
-    }
-
-    fn repl_eval_def_args(&mut self, arg_forms: &[QExp]) -> QResult<ReplOut> {
-        return self.eval_def_args(arg_forms)
-            .map(|qexp| ReplOut::NoPrint(qexp));
-    }
-
-    fn repl_eval_fn_args(&mut self, arg_forms: &[QExp]) -> QResult<ReplOut> {
-        return self.eval_fn_args(arg_forms)
-            .map(|qexp| ReplOut::Print(qexp));
-    }
-
-    fn repl_eval_defn_args(&mut self, arg_forms: &[QExp]) -> QResult<ReplOut> {
-        return self.eval_defn_args(arg_forms)
-            .map(|qexp| ReplOut::NoPrint(qexp));
     }
 
     fn repl_eval_builtin(&mut self, exp: &QExp, arg_forms: &[QExp])
@@ -166,10 +97,186 @@ impl<'a> ReplEnv for QEnv<'a> {
     {
         return match exp {
             qsymbol!(s) => match s.as_ref() {
-                "if" => Some(self.repl_eval_if_args(arg_forms)),
-                "def" => Some(self.repl_eval_def_args(arg_forms)),
-                "fn" => Some(self.repl_eval_fn_args(arg_forms)),
-                "defn" => Some(self.repl_eval_defn_args(arg_forms)),
+                "def" => Some(
+                    self.eval_def(arg_forms).map(ReplOut::as_noprint)),
+                ":=" => Some(
+                    self.eval_def(arg_forms).map(ReplOut::as_noprint)),
+                "let" => Some(
+                    self.eval_let(arg_forms).map(ReplOut::as_print)),
+                ":=*" => Some(
+                    self.eval_let(arg_forms).map(ReplOut::as_print)),
+                "fn" => Some(
+                    self.eval_fn(arg_forms).map(ReplOut::as_print)),
+                "`" => Some(
+                    self.eval_fn(arg_forms).map(ReplOut::as_print)),
+                "defn" => Some(
+                    self.eval_defn(arg_forms).map(ReplOut::as_noprint)),
+                ":`" => Some(
+                    self.eval_defn(arg_forms).map(ReplOut::as_noprint)),
+                "if" => Some(
+                    self.eval_if(arg_forms).map(ReplOut::as_print)),
+                "=>" => Some(
+                    self.eval_if(arg_forms).map(ReplOut::as_print)),
+                "and" => Some(
+                    self.eval_and(arg_forms).map(ReplOut::as_print)),
+                "&&" => Some(
+                    self.eval_and(arg_forms).map(ReplOut::as_print)),
+                "all" => Some(
+                    self.eval_all(arg_forms).map(ReplOut::as_print)),
+                "&&*" => Some(
+                    self.eval_all(arg_forms).map(ReplOut::as_print)),
+                "or" => Some(
+                    self.eval_or(arg_forms).map(ReplOut::as_print)),
+                "||" => Some(
+                    self.eval_or(arg_forms).map(ReplOut::as_print)),
+                "any" => Some(
+                    self.eval_any(arg_forms).map(ReplOut::as_print)),
+                "||*" => Some(
+                    self.eval_any(arg_forms).map(ReplOut::as_print)),
+                "xor" => Some(
+                    self.eval_xor(arg_forms).map(ReplOut::as_print)),
+                "^" => Some(
+                    self.eval_xor(arg_forms).map(ReplOut::as_print)),
+                "xany" => Some(
+                    self.eval_xany(arg_forms).map(ReplOut::as_print)),
+                "^*" => Some(
+                    self.eval_xany(arg_forms).map(ReplOut::as_print)),
+                "neg" => Some(
+                    self.eval_neg(arg_forms).map(ReplOut::as_print)),
+                "!" => Some(
+                    self.eval_neg(arg_forms).map(ReplOut::as_print)),
+                "mod" => Some(
+                    self.eval_mod(arg_forms).map(ReplOut::as_print)),
+                "%" => Some(
+                    self.eval_mod(arg_forms).map(ReplOut::as_print)),
+                "range" => Some(
+                    self.eval_range(arg_forms).map(ReplOut::as_print)),
+                ".." => Some(
+                    self.eval_range(arg_forms).map(ReplOut::as_print)),
+                "range-inc" => Some(
+                    self.eval_range_inc(arg_forms).map(ReplOut::as_print)),
+                "..=" => Some(
+                    self.eval_range_inc(arg_forms).map(ReplOut::as_print)),
+                "length" => Some(
+                    self.eval_length(arg_forms).map(ReplOut::as_print)),
+                "#" => Some(
+                    self.eval_length(arg_forms).map(ReplOut::as_print)),
+                "get" => Some(
+                    self.eval_get(arg_forms).map(ReplOut::as_print)),
+                "." => Some(
+                    self.eval_get(arg_forms).map(ReplOut::as_print)),
+                "slice" => Some(
+                    self.eval_slice(arg_forms).map(ReplOut::as_print)),
+                "--" => Some(
+                    self.eval_slice(arg_forms).map(ReplOut::as_print)),
+                "slice-inc" => Some(
+                    self.eval_slice_inc(arg_forms).map(ReplOut::as_print)),
+                "--=" => Some(
+                    self.eval_slice_inc(arg_forms).map(ReplOut::as_print)),
+                "slice-by" => Some(
+                    self.eval_slice_by(arg_forms).map(ReplOut::as_print)),
+                "~~" => Some(
+                    self.eval_slice_by(arg_forms).map(ReplOut::as_print)),
+                "slice-inc-by" => Some(
+                    self.eval_slice_inc_by(arg_forms).map(ReplOut::as_print)),
+                "~~=" => Some(
+                    self.eval_slice_inc_by(arg_forms).map(ReplOut::as_print)),
+                "step-by" => Some(
+                    self.eval_step_by(arg_forms).map(ReplOut::as_print)),
+                "~" => Some(
+                    self.eval_step_by(arg_forms).map(ReplOut::as_print)),
+                "enumerate" => Some(
+                    self.eval_enumerate(arg_forms).map(ReplOut::as_print)),
+                "##" => Some(
+                    self.eval_enumerate(arg_forms).map(ReplOut::as_print)),
+                "pick" => Some(
+                    self.eval_pick(arg_forms).map(ReplOut::as_print)),
+                ".*" => Some(
+                    self.eval_pick(arg_forms).map(ReplOut::as_print)),
+                "reverse" => Some(
+                    self.eval_reverse(arg_forms).map(ReplOut::as_print)),
+                "<>" => Some(
+                    self.eval_reverse(arg_forms).map(ReplOut::as_print)),
+                "first" => Some(
+                    self.eval_first(arg_forms).map(ReplOut::as_print)),
+                ".-" => Some(
+                    self.eval_first(arg_forms).map(ReplOut::as_print)),
+                "take" => Some(
+                    self.eval_take(arg_forms).map(ReplOut::as_print)),
+                "~." => Some(
+                    self.eval_take(arg_forms).map(ReplOut::as_print)),
+                "take-while" => Some(
+                    self.eval_take_while(arg_forms).map(ReplOut::as_print)),
+                "~.@" => Some(
+                    self.eval_take_while(arg_forms).map(ReplOut::as_print)),
+                "last" => Some(
+                    self.eval_last(arg_forms).map(ReplOut::as_print)),
+                "-." => Some(
+                    self.eval_last(arg_forms).map(ReplOut::as_print)),
+                "skip" => Some(
+                    self.eval_skip(arg_forms).map(ReplOut::as_print)),
+                ".~" => Some(
+                    self.eval_skip(arg_forms).map(ReplOut::as_print)),
+                "skip-while" => Some(
+                    self.eval_skip_while(arg_forms).map(ReplOut::as_print)),
+                ".~@" => Some(
+                    self.eval_skip_while(arg_forms).map(ReplOut::as_print)),
+                "append" => Some(
+                    self.eval_append(arg_forms).map(ReplOut::as_print)),
+                "+." => Some(
+                    self.eval_append(arg_forms).map(ReplOut::as_print)),
+                "prepend" => Some(
+                    self.eval_prepend(arg_forms).map(ReplOut::as_print)),
+                ".+" => Some(
+                    self.eval_prepend(arg_forms).map(ReplOut::as_print)),
+                "insert" => Some(
+                    self.eval_insert(arg_forms).map(ReplOut::as_print)),
+                "+.+" => Some(
+                    self.eval_insert(arg_forms).map(ReplOut::as_print)),
+                "map" => Some(
+                    self.eval_map(arg_forms).map(ReplOut::as_print)),
+                "@" => Some(
+                    self.eval_map(arg_forms).map(ReplOut::as_print)),
+                "filter" => Some(
+                    self.eval_filter(arg_forms).map(ReplOut::as_print)),
+                "@!" => Some(
+                    self.eval_filter(arg_forms).map(ReplOut::as_print)),
+                "flatten" => Some(
+                    self.eval_flatten(arg_forms).map(ReplOut::as_print)),
+                "__" => Some(
+                    self.eval_flatten(arg_forms).map(ReplOut::as_print)),
+                "contains" => Some(
+                    self.eval_contains(arg_forms).map(ReplOut::as_print)),
+                "=*" => Some(
+                    self.eval_contains(arg_forms).map(ReplOut::as_print)),
+                "fold" => Some(
+                    self.eval_fold(arg_forms).map(ReplOut::as_print)),
+                "@." => Some(
+                    self.eval_fold(arg_forms).map(ReplOut::as_print)),
+                "min" => Some(
+                    self.eval_min(arg_forms).map(ReplOut::as_print)),
+                "<<" => Some(
+                    self.eval_min(arg_forms).map(ReplOut::as_print)),
+                "max" => Some(
+                    self.eval_max(arg_forms).map(ReplOut::as_print)),
+                ">>" => Some(
+                    self.eval_max(arg_forms).map(ReplOut::as_print)),
+                "format" => Some(
+                    self.eval_format(arg_forms).map(ReplOut::as_print)),
+                "$" => Some(
+                    self.eval_format(arg_forms).map(ReplOut::as_print)),
+                "print" => Some(
+                    self.eval_print(arg_forms).map(ReplOut::as_noprint)),
+                "$-" => Some(
+                    self.eval_print(arg_forms).map(ReplOut::as_noprint)),
+                "println" => Some(
+                    self.eval_println(arg_forms).map(ReplOut::as_noprint)),
+                "$_" => Some(
+                    self.eval_println(arg_forms).map(ReplOut::as_noprint)),
+                "halt" => Some(
+                    self.eval_halt(arg_forms).map(ReplOut::as_noprint)),
+                "!!" => Some(
+                    self.eval_halt(arg_forms).map(ReplOut::as_noprint)),
                 _ => None,
             },
             _ => None,
@@ -226,7 +333,7 @@ pub fn run_repl() {
         match line_editor.read_line(&prompt) {
             Ok(reed::Signal::Success(s)) => {
                 let (expr, _comment): (String, String)
-                    = match s.split_once('#') {
+                    = match s.split_once(';') {
                         Some((e, c)) => (e.to_string(), c.to_string()),
                         None => (s, "".to_string()),
                     };
@@ -241,8 +348,11 @@ pub fn run_repl() {
                     },
                 }
             },
-            Ok(reed::Signal::CtrlD) | Ok(reed::Signal::CtrlC) => {
+            Ok(reed::Signal::CtrlD) => {
                 break;
+            },
+            Ok(reed::Signal::CtrlC) => {
+                continue;
             },
             x => { println_flush!("Error: {:?}", x); },
         }
