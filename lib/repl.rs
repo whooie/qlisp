@@ -25,8 +25,11 @@ macro_rules! println_flush {
     }
 }
 
-static HELP_TEXT: phf::Map<&'static str, &'static str> = phf_map! {
-    "def" => "
+static HELP_TEXT: phf::Map<&'static str, (&'static str, &'static str)>
+    = phf_map! {
+        "def" => (
+            "Assign a value to a symbol.",
+"
 Assign a value to a symbol and store it in the local environment.
 Alias: `:=`
 
@@ -39,8 +42,11 @@ q>> a ; evaluates to 6
 q>> (+ 5 (def b (* 10 11))) ; evalues to 115
 q>> b ; evaluates to 110
 ",
+        ),
 
-    "let" => "
+        "let" => (
+            "Assign multiple values to multiple symbols.",
+"
 Assign multiple values to multiple symbols, recusively unpacking lists if
 necessary. The top-level value expression must be a list.
 Alias: `:=*`
@@ -55,8 +61,11 @@ q>> b ; evaluates to 1
 q>> c ; evaluates to 2
 q>> d ; evaluates to (3 4 5)
 ",
+        ),
 
-    "fn" => "\
+        "fn" => (
+            "Construct an anonymous function.",
+"
 Construct an anonymous (lambda) function.
 Alias: `@:`
 
@@ -67,9 +76,12 @@ Example:
 q>> ; define a function of a, b that computes 5 * b + a and immediately call it
 q>> ((fn (a b) (+ a (* 5 b))) 8 2) ; evaluates to 18
 ",
+        ),
 
-    "defn" => "
-Portmanteau of 'def' and 'fn': Construct function and assign it to a symbol in
+        "defn" => (
+            "Construct a function and assign it to a symbol.",
+"
+Portmanteau of 'def' and 'fn': Construct a function and assign it to a symbol in
 the local environment.
 Alias: `@:=`
 
@@ -81,9 +93,12 @@ q>> ; recursive definition of the factorial operation
 q>> (defn factorial (n) (if (<= n 1) 1 (* (factorial (- n 1)) n)))
 q>> (factorial 5) ; evaluates to 120
 ",
+        ),
 
-    "if" => "
-Conditional statement: Evaluates one of two expressions based on the true/false
+        "if" => (
+            "Condition evaluation.",
+"
+Conditional expression: Evaluates one of two expressions based on the true/false
 value of a test expression.
 Alias: `=>`
 
@@ -96,8 +111,11 @@ q>> (if a 1 0) ; evaluates to 1
 q>> (def b false)
 q>> (if b 1 0) ; evaluates to 0
 ",
+        ),
 
-    "and" => "
+        "and" => (
+            "Logical AND operator.",
+"
 Logical AND operator, short-circuited and extended to n >= 0 inputs. Returns
 `true` if all inputs are booleans with positive value or if there are no inputs.
 Alias: `&&`
@@ -110,8 +128,11 @@ q>> (and true true true) ; evaluates to true
 q>> (and true true false) ; evaluates to false
 q>> (and) ; evaluates to true
 ",
+        ),
 
-    "all" => "
+        "all" => (
+            "Logical AND accumulator.",
+"
 Logical AND accumulator on a list input: Returns `true` if all items in a list
 are `true`, `false` otherwise.
 Alias: `&&*`
@@ -124,8 +145,11 @@ q>> (def numbers (range 0 5)) ; (0 1 2 3 4)
 q>> (all (map (fn (n) (< n 10)) numbers)) ; evaluates to true
 q>> (all (map (fn (n) (< n 2)) numbers)) ; evaluates to false
 ",
+        ),
 
-    "or" => "
+        "or" => (
+            "Logical OR operator.",
+"
 Logical OR operator, short-circuited and extended to n >= 0 inputs. Returns
 `true` if all evaluated inputs are booleans and at least one of them has
 positive value.
@@ -139,8 +163,11 @@ q>> (or true true true) ; evaluates to true
 q>> (or true false false) ; evaluates to true
 q>> (or) ; evaluates to false
 ",
+        ),
 
-    "any" => "
+        "any" => (
+            "Logical OR accumulator.",
+"
 Logical OR accumulator on a list input: Returns `true` if at least one item in
 a list is `true`, `false` otherwise.
 Alias: `||*`
@@ -153,8 +180,11 @@ q>> (def numbers (range 0 5)) ; (0 1 2 3 4)
 q>> (any (map (fn (n) (> n 10)) numbers)) ; evaluates to false
 q>> (any (map (fn (n) (> n 2)) numbers)) ; evaluates to true
 ",
+        ),
 
-    "xor" => "
+        "xor" => (
+            "Logical XOR operator.",
+"
 Logical XOR operator, short-circuited and extended to n >= 0 inputs. Returns
 `true` if exactly one input is `true`, `false` otherwise.
 Alias: `^`
@@ -167,8 +197,11 @@ q>> (xor true false false) ; evaluates to true
 q>> (xor true true false) ; evaluates to false
 q>> (xor) ; evaluates to false
 ",
+        ),
 
-    "xany" => "
+        "xany" => (
+            "Logical XOR accumulator",
+"
 Logical XOR accumulator on a list input: Returns `true` if exactly one item in
 a list is `true`, `false` otherwise.
 Alias: `^*`
@@ -181,8 +214,11 @@ q>> (def numbers (range 0 5)) ; (0 1 2 3 4)
 q>> (xany (map (fn (n) (> n 2)) numbers)) ; evaluates to false
 q>> (xany (map (fn (n) (= n 2)) numbers)) ; evaluates to true
 ",
+        ),
 
-    "neg" => "
+        "neg" => (
+            "Logical and arithmetic negative.",
+"
 Logical and arithmetic negative: For each input, returns the logical negation
 for booleans and additive inverse for other numerical types. If there is only
 one value, the output is a single value; otherwise results are returned in a
@@ -196,8 +232,11 @@ q>> (neg true) ; evaluates to false
 q>> (neg -5) ; evaluates to 5
 q>> (neg false 1.0546) ; evaluates to (true -1.0546)
 ",
+        ),
 
-    "range" => "
+        "range" => (
+            "Construct a list of integers on a semi-open interval.",
+"
 Construct a list of integers on a semi-open interval.
 Alias: `..`
 
@@ -208,8 +247,11 @@ Example:
 q>> (range 5 15) ; evaluates to (5 6 7 8 9 10 11 12 13 14)
 q>> (range 5 -5) ; evaluates to (5 4 3 2 1 0 -1 -2 -3 -4)
 ",
+        ),
 
-    "range-inc" => "
+        "range-inc" => (
+            "Construct a list of integers on a closed interval.",
+"
 Construct a list of integers on a closed interval.
 Alias: `..=`
 
@@ -220,8 +262,11 @@ Example:
 q>> (range-inc 5 15) ; evaluates to (5 6 7 8 9 10 11 12 13 14 15)
 q>> (range-inc 5 -5) ; evaluates to (5 4 3 2 1 0 -1 -2 -3 -4 -5)
 ",
+        ),
 
-    "repeat" => "
+        "repeat" => (
+            "Repeat a list or str `n` times.",
+"
 Construct a new list or str by repeating the contents of another `n` times.
 Alias: `#=`
 
@@ -232,8 +277,11 @@ Example:
 q>> (repeat 3 (1 2 3)) ; evaluates to (1 2 3 1 2 3 1 2 3)
 q>> (repeat 2 \"hello\") ; evaluates to \"hellohello\"
 ",
+        ),
 
-    "length" => "
+        "length" => (
+            "Find the length of a list or str.",
+"
 Return the number of items in a list or characters in a str.
 Alias: `#`
 
@@ -244,8 +292,11 @@ Example:
 q>> (length (range 0 10)) ; evaluates to 10
 q>> (length \"hello\") ; evaluates to 5
 ",
+        ),
 
-    "get" => "
+        "get" => (
+            "Get the element of a list or str at an index.",
+"
 Return the item of a list or character of a str at an index. Indicies must be
 non-negative integers.
 Alias: `.`
@@ -257,8 +308,11 @@ Example:
 q>> (get 3 (range-inc 1 10)) ; evaluates to 4
 q>> (get 4 \"hello world\") ; evaluates to \"o\"
 ",
+        ),
 
-    "set" => "
+        "set" => (
+            "Change the value of an item in a list.",
+"
 Return a copy of a list where values at given indices have been set to new ones.
 Each argument following the list must be a list of length 2 where the first item
 is the index and the second is the value.
@@ -270,8 +324,11 @@ Expected form:
 Example:
 q>> (set (range 0 10) (0 3) (7 10)) ; evaluates to (3 1 2 3 4 5 6 10 8 9)
 ",
+        ),
 
-    "slice" => "
+        "slice" => (
+            "Slice a list or str over a semi-open range of indices.",
+"
 Return a slice of a list or substring of a str over a semi-open range of
 indices.
 Alias: `--`
@@ -283,8 +340,11 @@ Example:
 q>> (slice 2 7 (range 10 0)) ; evaluates to (8 7 6 5 4)
 q>> (slice 2 7 \"hello world\") ; evaluates to \"llo w\"
 ",
+        ),
 
-    "slice-inc" => "
+        "slice-inc" => (
+            "Slice a list or str over a closed range of indices.",
+"
 Return a slice of a list or substring of a str over a closed range of indices.
 Alias: `--=`
 
@@ -295,8 +355,11 @@ Example:
 q>> (slice-inc 2 7 (range 10 0)) ; evaluates to (8 7 6 5 4 3)
 q>> (slice-inc 2 7 \"hello world\") ; evaluates to \"llo wo\"
 ",
+        ),
 
-    "slice-by" => "
+        "slice-by" => (
+            "Step through a semi-open slice.",
+"
 Portmanteau of slice and step-by: Return a slice of a list or substring of a str
 over a semi-open range of indices with a given step size.
 Alias: `~~`
@@ -308,8 +371,11 @@ Example:
 q>> (slice-by 2 7 2 (range 10 0)) ; evaluates to (8 6 4)
 q>> (slice-by 2 7 2 \"hello world\") ; evaluates to \"low\"
 ",
+        ),
 
-    "slice-inc-by" => "
+        "slice-inc-by" => (
+            "Step through a closed slice.",
+"
 Portmanteau of slice-inc and step-by: Return a slice of a list or substring of a
 str over a closed range of indices with a given step size.
 Alias: `~~=`
@@ -321,9 +387,12 @@ Example:
 q>> (slice-by 2 8 2 (range 10 0)) ; evaluates to (8 6 4 2)
 q>> (slice-by 2 8 2 \"hello world\") ; evaluates to \"lowr\"
 ",
+        ),
 
-    "step-by" => "
-Step through a list or string with a given step size.
+        "step-by" => (
+            "Step through a list or str.",
+"
+Step through a list or str with a given step size.
 Alias `~`
 
 Expected form:
@@ -333,8 +402,11 @@ Example:
 q>> (step-by 3 (range 0 15)) ; evaluates to (0 3 6 9 12)
 q>> (step-by 3 \"hello world\") ; evaluates to \"hlwl\"
 ",
+        ),
 
-    "enumerate" => "
+        "enumerate" => (
+            "Convert elements in a list or str to (index, element) pairs.",
+"
 Convert each item in a list or character in a str to a two-item list containing
 the item or character and its index.
 Alias: `##`
@@ -346,8 +418,11 @@ Example:
 q>> (enumerate (1 1.0 1i)) ; evaluates to ((0 true) (1 1) (2 1.0) (3 0.0+1.0i))
 q>> (enumerate \"hello\") ; evaluates to ((0 \"h\") (1 \"e\") (2 \"l\") (3 \"l\") (4 \"o\"))
 ",
+        ),
 
-    "pick" => "
+        "pick" => (
+            "Select multiple elements from a list or str",
+"
 Select items from a list or characters from a str at specific indices and return
 them in a new list or str.
 Alias: `.*`
@@ -359,9 +434,12 @@ Example:
 q>> (pick (0 5 3 3 6) (range 10 0)) ; evaluates to (10 5 7 7 4)
 q>> (pick (0 5 3 3 6) \"hello world\") ; evaluates to \"h llw\"
 ",
+        ),
 
-    "reverse" => "
-Reverses the order of a list or str.
+        "reverse" => (
+            "Reverse the order of a list or str.",
+"
+Reverse the order of a list or str.
 Alias: `<>`
 
 Expected form:
@@ -371,8 +449,11 @@ Example:
 q>> (reverse (range 0 10)) ; evaluates to (9 8 7 6 5 4 3 2 1 0)
 q>> (reverse \"hello world\") ; evaluates to \"dlrow olleh\"
 ",
+        ),
 
-    "cycle" => "
+        "cycle" => (
+            "Shift elements in a list or str, wrapping at the ends.",
+"
 Shift the positions of items in a list or characters in a str by a constant
 offset n, wrapping around the ends; i.e. move the item at index k to new index
 (k + n) % N, where N is the length of the list or str.
@@ -385,8 +466,11 @@ Example:
 q>> (cycle 2 (range 0 10)) ; evaluates to (8 9 0 1 2 3 4 5 6 7)
 q>> (cycle 2 \"hello world\") ; evaluates to \"ldhello wor\"
 ",
+        ),
 
-    "first" => "
+        "first" => (
+            "Get the first element in a list or str.",
+"
 Get the item in a list or character in a str at index 0. Equivalent to
 (get 0 ...).
 Alias: `.-`
@@ -398,8 +482,11 @@ Example:
 q>> (first (range 0 10)) ; evaluates to 0
 q>> (first \"hello world\") ; evaluates to \"h\"
 ",
+        ),
 
-    "take" => "
+        "take" => (
+            "Take the first `n` element of a list or str.",
+"
 Take the first `n` items in a list or characters in a str, discarding the rest.
 Alias: `~.`
 
@@ -410,8 +497,11 @@ Example:
 q>> (take 5 (range 0 10)) ; evaluates to (0 1 2 3 4)
 q>> (take 5 \"hello world\") ; evaluates to \"hello\"
 ",
+        ),
 
-    "take-while" => "
+        "take-while" => (
+            "Take elements of a list or str satisfying a predicate.",
+"
 Iterate from the start of a list or str, taking all items or characters for
 which a function returns `true`, discarding all after and including the first
 for which the function returns `false`. The function must return a bool for all
@@ -425,8 +515,11 @@ Example:
 q>> (take-while (fn (n) (< n 3)) (0 1 3 2 2 5)) ; evaluates to (0 1)
 q>> (take-while (fn (c) (!= c \" \") \"hello world\") ; evaluates to \"hello\"
 ",
+        ),
 
-    "last" => "
+        "last" => (
+            "Get the last element of a list or str.",
+"
 Get the item in a list or character in a str at index N - 1, where N is the
 length of the list or str. Equivalent to (get (- N 1) ...).
 Alias: `-.`
@@ -438,8 +531,11 @@ Example:
 q>> (last (range 0 10)) ; evaluates to 9
 q>> (last \"hello world\") ; evaluates to \"d\"
 ",
+        ),
 
-    "skip" => "
+        "skip" => (
+            "Discard the first `n` elements of a list or str.",
+"
 Discard the first `n` items in a list or characters in a str, keeping the rest.
 Alias: `.~`
 
@@ -450,8 +546,11 @@ Example:
 q>> (skip 5 (range 0 10)) ; evaluates to (5 6 7 8 9)
 q>> (skip 5 \"hello world\") ; evaluates to \" world\"
 ",
+        ),
 
-    "skip-while" => "
+        "skip-while" => (
+            "Skip elements of a list or str satisfying a predicate.",
+"
 Iterate from the start of a list or str, skipping all items or characters for
 which a function returns `true`, keeping all after and including the first for
 which the function returns `false`. The function must return a bool for all
@@ -465,8 +564,11 @@ Example:
 q>> (skip-while (fn (n) (< n 3)) (0 1 3 2 2 5)) ; evaluates to (3 2 2 5)
 q>> (skip-while (fn (c) (!= c \" \")) \"hello world\") ; evaluates to \" world\"
 ",
+        ),
 
-    "split-at" => "
+        "split-at" => (
+            "Divide a list or str into two pieces.",
+"
 Divide a list or str into two pieces with the first containing the first `n`
 items or characters and the second containing the rest.
 Alias: `|.`
@@ -478,8 +580,11 @@ Example:
 q>> (split-at 7 (range 0 10)) ; evaluates to ((0 1 2 3 4 5 6) (7 8 9))
 q>> (split-at 7 \"hello world\") ; evaluates to (\"hello w\" \"orld\")
 ",
+        ),
 
-    "split-on" => "
+        "split-on" => (
+            "Divide a list or str into pieces.",
+"
 Iterate from the start of a list or str, splitting into slices or substrings on
 each item or character for which a function returns `true`. Matched elements are
 discarded.
@@ -494,8 +599,11 @@ q>> (split-on div3 (range 0 5)) ; evaluates to (() (1 2) (4))
 q>> (defn is_space (c) (= c \" \"))
 q>> (split-on is_space \"hello world\"); evaluates to (\"hello\" \"world\")
 ",
+        ),
 
-    "split-on-inc" => "
+        "split-on-inc" => (
+            "Divide a list or str into pieces, keeping split elements.",
+"
 Iterate from the start of a list or str, splitting into slices or substrings on
 each item or character for which a function returns `true`. Matched elements are
 contained in the previous slice or substring.
@@ -510,10 +618,13 @@ q>> (split-on-inc div3 (range 0 5)) ; evaluates to ((0) (1 2 3) (4))
 q>> (defn is_space (c) (= c \" \"))
 q>> (split-on-inc is_space \"hello world\"); evaluates to (\"hello \" \"world\")
 ",
+        ),
 
-    "append" => "
-Append one or more items, one by one, to the end of a list or strings to the end
-of another string.
+        "append" => (
+            "Append elements to the end of a list or str.",
+"
+Append one or more items, one by one, to the end of a list or strs to the end
+of another str.
 Alias: `+.`
 
 Expected form:
@@ -523,8 +634,11 @@ Example:
 q>> (append (0 1 2) true 5i \"abc\") ; evaluates to (0 1 2 true 5i \"abc\")
 q>> (append \"hello \" \"wo\" \"rld\") ; evaluates to \"hello world\"
 ",
+        ),
 
-    "prepend" => "
+        "prepend" => (
+            "Prepend element to the beginning of a list or str.",
+"
 Prepend one or more items, one by one, to the beginning of a list or strings to
 the beginning of another string. Note that this process inverts the order of
 arguments following the list or str.
@@ -537,8 +651,11 @@ Example:
 q>> (prepend (0 1 2) true 5i \"abc\") ; evaluates to (5i true 0 1 2)
 q>> (prepend \"hello \" \"wo\" \"rld\") ; evaluates to \"rldwohello \"
 ",
+        ),
 
-    "insert" => "
+        "insert" => (
+            "Insert one or more elements into a list or str.",
+"
 Insert one or more items into a list or strings into another string at a given
 index. The order of arguments following the list or str is preserved.
 Alias: `+.+`
@@ -550,8 +667,11 @@ Example:
 q>> (insert 3 (range 0 5) true false) ; evaluates to (0 1 2 true false 3 4)
 q>> (insert 3 \"hello world\" \"abc\" \"def\") ; evaluates to \"helabcdeflo world\"
 ",
+        ),
 
-    "map" => "
+        "map" => (
+            "Apply a function to each element of a list or str.",
+"
 Apply a function to each item of a list or character of a str and return the
 results in a list.
 Alias: `@`
@@ -563,8 +683,11 @@ Example:
 q>> (map (fn (n) (* n n)) (range 0 8)) ; evaluates to (0 1 4 9 25 36 49 64)
 q>> (map (fn (c) (= c \"l\")) \"hello\") ; evaluates to (false false true true false)
 ",
+        ),
 
-    "filter" => "
+        "filter" => (
+            "Take only elements of a list or str satisfying a predicate.",
+"
 Apply a function to each item of a list or character of a str and discard all
 for which the function returns `false`. The function must return a bool for all
 inputs.
@@ -577,8 +700,11 @@ Example:
 q>> (filter (fn (n) (= (% 3 n) 0)) (range 0 10)) ; evaluates to (0 3 6 9)
 q>> (filter (fn (c) (= c \"l\")) \"hello world\") ; evaluates to \"lll\"
 ",
+        ),
 
-    "unique" => "
+        "unique" => (
+            "Reduce a list or str to only its unique elements.",
+"
 Reduce a list or str down to only unique items or characters. If two elements
 are equal, the element nearer to the start of the list or str is kept; order is
 otherwise maintained.
@@ -591,9 +717,12 @@ Example:
 q>> (unique (true 1 1 5i false true)) ; evaluates to (true 1 5i false)
 q>> (unique \"hello world\") ; evaluates to \"helo wrd\"
 ",
+        ),
 
-    "flatten" => "
-Recursively unpacks nested lists so that all items lie next to each other in a
+        "flatten" => (
+            "Recursively unpack nested lists.",
+"
+Recursively unpack nested lists so that all items lie next to each other in a
 single list.
 Alias `__`
 
@@ -603,8 +732,11 @@ Expected form:
 Example:
 q>> (flatten ((1 2 3) (4 5 6) (7 8 9))) ; evaluates to (1 2 3 4 5 6 7 8 9)
 ",
+        ),
 
-    "contains" => "
+        "contains" => (
+            "Determine whether a list or str contains a particular element.",
+"
 Returns `true` if a given list or str contains a given item or substring.
 Alias: `*=`
 
@@ -616,8 +748,11 @@ q>> (contains (range 0 10) 5) ; evaluates to true
 q>> (contains \"hello world\" \"o w\") ; evaluates to true
 q>> (contains \"hello world\" \"a\") ; evaluates to false
 ",
+        ),
 
-    "index-of" => "
+        "index-of" => (
+            "Find the first occurrence of an element in a list or str",
+"
 Returns the index of the first occurrence of an item or substring in a list or
 str. If the list or str does not contain the element, -1 is returned.
 Alias: `#*=`
@@ -630,8 +765,11 @@ q>> (index-of (range 10 0) 9) ; evaluates to 1
 q>> (index-of \"hello world\" \"l\") ; evaluates to 2
 q>> (index-of \"hello world\" \"a\") ; evaluates to -1
 ",
+        ),
 
-    "fold" => "
+        "fold" => (
+            "Fold elements of a list or str into an accumulator.",
+"
 Iterate over a list or str, folding each element into an accumulator by applying
 a function. The function should take two arguments with the first being the
 accumulator.
@@ -644,8 +782,11 @@ Example:
 q>> (defn f (acc x) (if (= (% 2 x) 0) (+ acc x) (* acc x)))
 q>> (fold 1 f (range 0 4)) ; evaluates to 9
 ",
+        ),
 
-    "min" => "
+        "min" => (
+            "Find the minimum of a list or str.",
+"
 Find the minimum of a list or str using the `<` function.
 Alias: `<<`
 
@@ -656,8 +797,11 @@ Example:
 q>> (min (range 5 -5)) ; evaluates to -4
 q>> (min \"hello world\") ; evaluates to \" \"
 ",
+        ),
 
-    "max" => "
+        "max" => (
+            "Find the maximum of a list or str.",
+"
 Find the maximum of a list or str using the `>` function.
 Alias: `>>`
 
@@ -668,8 +812,11 @@ Example:
 q>> (max (range 5 -5)) ; evaluates to 5
 q>> (max \"hello world\") ; evaluates to \"w\"
 ",
+        ),
 
-    "select-by" => "
+        "select-by" => (
+            "Select an element of a list or str by a comparison function.",
+"
 Select an extremum element through element-wise comparisons with an accumulator
 using a comparison function. The function should take two arguments, with the
 first being the trial element and the second being the accumulator, and return
@@ -687,8 +834,11 @@ q>> ; find the maximum number in a list divisible by 3
 q>> (defn maxdiv3 (x acc) (and (= (mod 3 x) 0) (> x acc)))
 q>> (select-by maxdiv3 (0 5 3 7 5 6 6 9 7 3 5 12 3 10)) ; evaluates to 12
 ",
+        ),
 
-    "sort" => "
+        "sort" => (
+            "Sort the elements of a list or str.",
+"
 Sort a list or str in ascending order using the `<` function. This sort is
 stable and performs in O(n log(n)) time.
 Alias: `<*`
@@ -700,8 +850,11 @@ Example:
 q>> (sort (4 7 3 5 5 2 7 9 4 6 8)) ; evaluates to (2 3 4 4 5 5 6 7 7 8 9)
 q>> (sort \"hello world\") ; evaluates to \" dehllloorw\"
 ",
+        ),
 
-    "sort-by" => "
+        "sort-by" => (
+            "Sort the elements of a list or str by a comparison function.",
+"
 Sort a list or str using a given comparison function. The function should take
 two arguments, x and y, and return `true` if x should come before y, `false`
 otherwise.
@@ -715,8 +868,11 @@ q>> (sort-by > (4 7 3 5 5 2 7 9 4 6 8)) ; evaluates to (9 8 7 7 6 5 5 4 4 3 2)
 q>> (defn listmax (a b) (> (max a) (max b)))
 q>> (sort-by listmax ((1 5) (6 2) (0 10))) ; evaluates to ((0 10) (6 2) (1 5))
 ",
+        ),
 
-    "permute" => "
+        "permute" => (
+            "Perform a series of cyclic permutations on a list or str.",
+"
 Perform a series of permutations on a list X. Permutations are described
 by n-item lists of indices (i_1 i_2 ... i_n) where the presence of an index i_k
 indicates that the element in X at i_k is to be replaced by the element at
@@ -735,8 +891,11 @@ q>> (permute (\"a\" \"b\" \"c\") (0 1 2)) ; evaluates to (\"c\" \"a\" \"b\")
 q>> ; non-total cyclic permutations
 q>> (permute (range 0 10) (0 2 4 6)) ; evaluates to (6 1 0 3 2 5 4 7 8 9)
 ",
+        ),
 
-    "format" => "
+        "format" => (
+            "Substitute values for patterns in a str.",
+"
 Substitute values for patterns in a format string.
 Alias: `$`
 
@@ -747,8 +906,11 @@ Example:
 q>> (format \"hello, {}!\" \"John\") ; evaluates to \"hello, John!\"
 q>> (format \"{:.5}\" 3.141592653589793238) ; evaluates to \"3.14159\"
 ",
+        ),
 
-    "print" => "
+        "print" => (
+            "Print a formatted str to STDOUT.",
+"
 Substitute values for patterns in a format string and print to STDOUT. If a
 single value is passed, the value is returned; if multiple values are passed,
 they are all returned in a list.
@@ -763,8 +925,11 @@ q>> ; passed values are returned, so `print` can be inserted in the middle of
 q>> ; other expressions
 q>> (+ (print \"{}\" (* 2 3)) 5) ; prints `6` and evaluates to 11
 ",
+        ),
 
-    "println" => "
+        "println" => (
+            "Print a formatted str to STDOUT with a newline appended.",
+"
 Substitute values for patterns in a format string and print to STDOUT with
 newline appended. If a single value is passed, the value is returned; if
 multiple values are passed, they are all returned in a list.
@@ -779,8 +944,11 @@ q>> ; passed values are returned, so `print` can be inserted in the middle of
 q>> ; other expressions
 q>> (+ (println \"{}\" (* 2 3)) 5) ; prints `6\\n` and evaluates to 11
 ",
+        ),
 
-    "halt" => "
+        "halt" => (
+            "Halt execution of a program with an error message.",
+"
 Substitute values for patterns in a format string and return the result as an
 error.
 Alias: `!!`
@@ -792,8 +960,11 @@ Example:
 q>> (defn a -1)
 q>> (if (> a 0) (* a 2) (halt \"expected a positive value, but got {}\" a))
 ",
+        ),
 
-    "istype" => "
+        "istype" => (
+            "Test the type of a value.",
+"
 Returns `true` if a value is of a given type or list of types, `false`
 otherwise. Types must be specified as strs. Available type names are: `bool`,
 `int`, `float`, `complex`, `list`, `str`, `function`, `any`.
@@ -808,8 +979,11 @@ q>> (istype \"complex\" z) ; evaluates to true
 q>> (def reals (\"bool\" \"int\" \"float\"))
 q>> (if (istype reals z) 0 1) ; evaluates to 1
 ",
+        ),
 
-    "type" => "
+        "type" => (
+            "Get the type(s) of one or more values.",
+"
 Get the type(s) of one or more values as strs. If one value is passed, the
 result is returned as a single string, otherwise a list of strings is returned.
 Possible return values are \"bool\", \"int\", \"float\", \"complex\", \"list\",
@@ -823,8 +997,11 @@ Example:
 q>> (type true) ; evaluates to \"bool\"
 q>> (type true 1 1.0 1i) ; evaluates to (\"bool\" \"int\" \"float\" \"complex\")
 ",
+        ),
 
-    "mod" => "
+        "mod" => (
+            "Modulo operator.",
+"
 Modulo operator for single numbers or a list of numbers. Returned values are
 non-negative.
 Alias: `%`
@@ -836,8 +1013,11 @@ Example:
 q>> (mod 2.5 -5.5) ; evaluates to 2.0
 q>> (mod 10 (range 5 15)) ; evaluates to (5 6 7 8 9 0 1 2 3 4)
 ",
+        ),
 
-    "abs" => "
+        "abs" => (
+            "Absolute value operation.",
+"
 Absolute value operation for single numbers or a list of numbers.
 Alias: `|.|`
 
@@ -848,7 +1028,8 @@ Example:
 q>> (abs -5) ; evaluates to 5
 q>> (abs (-4 3.2 3+4i)) ; evaluates to (4 3.2 5.0)
 ",
-};
+        ),
+    };
 
 static FUNCTION_SYMBOLS: phf::Map<&'static str, &'static str> = phf_map! {
     ":="    => "def",
@@ -1029,14 +1210,32 @@ impl<'a> ReplEnv for QEnv<'a> {
     }
 
     fn repl_eval_help(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
+        if arg_forms.len() == 0 {
+            let mut topics: Vec<(&'static str, &'static str)>
+                = (&HELP_TEXT).into_iter()
+                .map(|(t, (s, _))| (*t, *s))
+                .collect();
+            topics.sort_by(|l, r| l.0.cmp(r.0));
+            println_flush!("{}", "-".repeat(80));
+            println!(
+"Help: Print information on various topics.\n\
+Type `(help <topics>...)` for more information on one or more specific topic.\n\
+Available topics:"
+            );
+            for (topic, text) in topics.into_iter() {
+                println_flush!("{:>14}    {}", topic, text);
+            }
+            println_flush!("{}", "-".repeat(80));
+            return Ok(qbool!(true));
+        }
         for arg in arg_forms.iter() {
             println_flush!("{}", "-".repeat(80));
             match arg {
                 qstr!(s) | qsymbol!(s) => {
-                    if let Some(help_text) = HELP_TEXT.get(s) {
+                    if let Some((_, help_text)) = HELP_TEXT.get(s) {
                         println_flush!("Help for {}:\n{}", s, help_text);
                     } else if let Some(unalias) = FUNCTION_SYMBOLS.get(s) {
-                        if let Some(help_text) = HELP_TEXT.get(unalias) {
+                        if let Some((_, help_text)) = HELP_TEXT.get(unalias) {
                             println_flush!(
                                 "Help for {} ({}):\n{}",
                                 s, unalias, help_text
@@ -1355,6 +1554,10 @@ pub fn run_repl() {
     let mut env = QEnv::default();
     let mut line_editor = reed::Reedline::create();
     let prompt = QPrompt { };
+    println!(
+        "Welcome to the QLisp interpreter REPL. Type `(help)` for more \
+        information."
+    );
     loop {
         match line_editor.read_line(&prompt) {
             Ok(reed::Signal::Success(s)) => {
