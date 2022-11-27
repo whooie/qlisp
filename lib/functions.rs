@@ -1,4 +1,5 @@
 use std::cmp;
+use itertools::Itertools;
 use crate::{
     qerr,
     qbool,
@@ -66,6 +67,26 @@ pub fn fn_div(args: &[QExp]) -> QResult<QExp> {
         .clone();
     for x in nums[1..].iter() {
         acc = acc.div(x)?;
+    }
+    return Ok(acc);
+}
+
+pub fn fn_idiv(args: &[QExp]) -> QResult<QExp> {
+    let (nums, mut div_type): (Vec<QExp>, QExpType)
+        = convert_numbers_sametype(args)?;
+    div_type = cmp::max(div_type, qfloat!());
+    if div_type > qfloat!() {
+        return Err(qerr!("cannot do floor division with complex numbers"));
+    }
+    if nums.len() == 1 {
+        return QExp::zero(qint!());
+    }
+    let mut acc: QExp
+        = nums.first()
+        .ok_or(qerr!("expected at least one number"))?
+        .clone();
+    for x in nums[1..].iter() {
+        acc = acc.idiv(x)?;
     }
     return Ok(acc);
 }
@@ -156,7 +177,7 @@ pub fn fn_geq(args: &[QExp]) -> QResult<QExp> {
         return Ok(qbool!(true));
     }
     for x in args[1..].iter() {
-        if !last.le(x)? {
+        if !last.ge(x)? {
             return Ok(qbool!(false));
         }
         last = x;
@@ -210,6 +231,35 @@ pub fn fn_zip(args: &[QExp]) -> QResult<QExp> {
     }?;
     construct_zip(&mut acc, &args[1..])?;
     return Ok(qlist!(acc.into_iter().map(|zk| qlist!(zk)).collect()));
+}
+
+pub fn fn_cart(args: &[QExp]) -> QResult<QExp> {
+    let items: Vec<QExp> = args.iter()
+        .map(|qk| {
+            match qk {
+                qlist!(_) => Ok(qk.clone()),
+                qstr!(_) => Ok(qk.clone()),
+                _ => Err(qerr!("cart: args must be strs or lists")),
+            }
+        })
+        .collect::<QResult<Vec<QExp>>>()?
+        .into_iter()
+        .map(|qk| {
+            match qk {
+                qlist!(l) => l.into_iter(),
+                qstr!(s) => {
+                    s.chars()
+                        .map(|sk| qstr!(sk.to_string()))
+                        .collect::<Vec<QExp>>()
+                        .into_iter()
+                },
+                _ => { panic!("unexpected state in cart"); }
+            }
+        })
+        .multi_cartesian_product()
+        .map(|vk| qlist!(vk))
+        .collect();
+    return Ok(qlist!(items));
 }
 
 pub fn fn_bool(args: &[QExp]) -> QResult<QExp> {

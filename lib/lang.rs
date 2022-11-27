@@ -2,6 +2,7 @@ use std::{
     cmp,
     collections::HashMap,
     fmt,
+    mem,
     rc::Rc,
     str::FromStr,
 };
@@ -43,70 +44,132 @@ macro_rules! qerr_fmt(
 );
 
 const BUILTINS: &'static [&'static str] = &[
-    "def",              ":=", //
-    "let",              ":=*", //
-    "fn",               "`", //
-    "defn",             ":`", //
-    "if",               "=>", //
-    "and",              "&&", //
-    "all",              "&&*", //
-    "or",               "||", //
-    "any",              "||*", //
-    "xor",              "^", //
-    "xany",             "^*", //
-    "neg",              "!", //
-    "mod",              "%", //
-    "range",            "..", //
-    "range-inc",        "..=", //
-    "length",           "#", //
-    "get",              ".", //
-    "slice",            "--", //
-    "slice-inc",        "--=", //
-    "slice-by",         "~~", //
-    "slice-inc-by",     "~~=", //
-    "step-by",          "~", //
-    "enumerate",        "##", //
-    "pick",             ".*", //
-    "reverse",          "<>", //
-    "first",            ".-", //
-    "take",             "~.", //
-    "take-while",       "~.@", //
-    "last",             "-.", //
-    "skip", "           .~", //
-    "skip-while",       ".~@", //
-    "append",           "+.", //
-    "prepend",          ".+", //
-    "insert",           "+.+", //
-    "map",              "@", //
-    "filter",           "@!", //
-    "flatten",          "__",
-    "contains",         "*=",
-    "fold",             "@.",
-    "min",              "<<",
-    "max",              ">>",
-    "format",           "$", //
-    "print",            "$-", //
-    "println",          "$_", //
-    "halt",             "!!", //
-    // below are functions implemented in qlang::functions
-    "add",              "+", //
-    "sub",              "-", //
-    "mul",              "*", //
-    "div",              "/", //
-    "eq",               "=", //
-    "neq",              "!=", //
-    "gt",               ">", //
-    "geq",              ">=", //
-    "lt",               "<", //
-    "leq",              "<=", //
-    "join",             "++", //
-    "zip",              "::", //
-    "bool",
-    "int",
-    "float",
-    "complex",
-    "list",
-    "str",
+    "def",              ":=",   // done
+    "let",              ":=*",  // done
+    "fn",               "@:",   // done
+    "defn",             "@:=",  // done
+    "if",               "=>",   // done
+    "and",              "&&",   // done
+    "all",              "&&*",  // done
+    "or",               "||",   // done
+    "any",              "||*",  // done
+    "xor",              "^",    // done
+    "xany",             "^*",   // done
+    "neg",              "!",    // done
+    "range",            "..",   // done
+    "range-inc",        "..=",  // done
+    "repeat",           "#=",   // done
+    "length",           "#",    // done
+    "get",              ".",    // done
+    "set",              ".:=",  // done
+    "slice",            "--",   // done
+    "slice-inc",        "--=",  // done
+    "slice-by",         "~~",   // done
+    "slice-inc-by",     "~~=",  // done
+    "step-by",          "~",    // done
+    "enumerate",        "##",   // done
+    "pick",             ".*",   // done
+    "reverse",          "<>",   // done
+    "cycle",            "<#>",  // done
+    "first",            ".-",   // done
+    "take",             "~.",   // done
+    "take-while",       "~.@",  // done
+    "last",             "-.",   // done
+    "skip", "           .~",    // done
+    "skip-while",       ".~@",  // done
+    "split-at",         "|.",   // done
+    "split-on",         "|@",   // done
+    "split-on-inc",     "|@=",  // done
+    "append",           "+.",   // done
+    "prepend",          ".+",   // done
+    "insert",           "+.+",  // done
+    "map",              "@",    // done
+    "filter",           "@!",   // done
+    "unique",           "*!=",  // done
+    "flatten",          "__",   // done
+    "contains",         "*=",   // done
+    "index-of",         "#*=",  // done
+    "fold",             "@.",   // done
+    "min",              "<<",   // done
+    "max",              ">>",   // done
+    "select-by",        "*@.",  // done
+    "sort",             "<*",   // done
+    "sort-by",          "<@",   // done
+    "permute",          ".~.",  // done
+    "format",           "$",    // done
+    "print",            "$-",   // done
+    "println",          "$_",   // done
+    "halt",             "!!",   // done
+    "istype",           "~?",   // done
+    "type",             "?~",   // done
+    // math
+    "mod",              "%",    // done
+    "abs",              "|.|",  
+    "recip",            "1/",   
+    "sqrt",                     
+    "cbrt",                     
+    "exp",              "e**",  
+    "floor",            "~_",   
+    "ceil",             "~^",   
+    "round",            "~.",   
+    "padd",             "p+",   
+    "log",                      
+    "ln",                       
+    "pow",              "**",   
+    "sin",                      
+    "cos",                      
+    "tan",                      
+    "asin",                     
+    "acos",                     
+    "atan",                     
+    "atan2",                    
+    "sinh",                     
+    "cosh",                     
+    "tanh",                     
+    "asinh",                    
+    "acosh",                    
+    "atanh",                    
+    "arg",                      
+    "cis",              "e**i", 
+    "conj",             "~z",   
+    "real",             "Re",   
+    "imag",             "Im",   
+    "sum",              "{S}",  
+    "product",          "{P}",  
+    "mean",             "{E}",  
+    "variance",         "Var",  
+    "stddev",           "Std",  
+    "moment",           "{En}", 
+    "covariance",       "Cov",  
+    "correlation",      "Corr", 
+    "convolve",         "{*}",  
+    "histogram",        "|#|",  
+    "histogram-prob",   "|p|",  
+    "fft",              "{F}",  
+    "ifft",             "{iF}", 
+    "findpeaks",        "^?",   
+    "sample",           "?.",   
+    // implemented in qlisp::functions
+    "add",              "+",    // done
+    "sub",              "-",    // done
+    "mul",              "*",    // done
+    "div",              "/",    // done
+    "idiv",             "//",   // done
+    "eq",               "=",    // done
+    "neq",              "!=",   // done
+    "gt",               ">",    // done
+    "geq",              ">=",   // done
+    "lt",               "<",    // done
+    "leq",              "<=",   // done
+    "join",             "++",   // done
+    "zip",              "::",   // done
+    "cart",             ":*:",  // done
+    "bool",                     // done
+    "int",                      // done
+    "float",                    // done
+    "complex",                  // done
+    "list",                     // done
+    "str",                      // done
 ];
 
 pub type QResult<T> = Result<T, QErr>;
@@ -324,6 +387,17 @@ impl From<usize> for QExpType {
     }
 }
 
+impl QExpType {
+    pub fn eq_user(&self, other: &Self) -> bool {
+        return match self {
+            qfunc!() => [qfunc!(), qlambda!()].contains(other),
+            qlambda!() => [qfunc!(), qlambda!()].contains(other),
+            qany!() => true,
+            ty => ty == other,
+        };
+    }
+}
+
 impl QExp {
     pub fn exp_type(&self) -> QExpType {
         return match self {
@@ -337,6 +411,26 @@ impl QExp {
             qfunc!(_) => qfunc!(),
             qlambda!(_) => qlambda!(),
         };
+    }
+
+    pub fn exp_type_user(&self) -> QResult<QExp> {
+        let ty: String = match self.exp_type() {
+            qbool!() => "bool",
+            qint!() => "int",
+            qfloat!() => "float",
+            qcomplex!() => "complex",
+            qlist!() => "list",
+            qstr!() => "str",
+            qsymbol!() => "symbol",
+            qfunc!() => "function",
+            qlambda!() => "function",
+            qany!() => "any",
+        }.to_string();
+        return Ok(qstr!(ty));
+    }
+
+    pub fn is_type_user(&self, types: &[QExpType]) -> bool {
+        return types.iter().any(|ty| ty.eq_user(&self.exp_type()));
     }
 
     pub fn zero(ty: QExpType) -> QResult<QExp> {
@@ -476,10 +570,19 @@ impl QExp {
         let lhs_c: QExp = convert_type_num(self, ret_type)?;
         let rhs_c: QExp = convert_type_num(rhs,  ret_type)?;
         return match (lhs_c, rhs_c) {
-            (qint!(l), qint!(r)) => Ok(qint!(l / r)),
             (qfloat!(l), qfloat!(r)) => Ok(qfloat!(l / r)),
             (qcomplex!(l), qcomplex!(r)) => Ok(qcomplex!(l / r)),
             _ => Err(qerr!("invalid type in div")),
+        };
+    }
+
+    pub fn idiv(&self, rhs: &QExp) -> QResult<QExp> {
+        (!rhs.is_zero()).then(|| ()).ok_or(qerr!("encountered zero in idiv"))?;
+        let lhs_c: QExp = convert_type_num(self, qfloat!())?;
+        let rhs_c: QExp = convert_type_num(rhs,  qfloat!())?;
+        return match (lhs_c, rhs_c) {
+            (qfloat!(l), qfloat!(r)) => Ok(qint!(l.div_euclid(r) as i64)),
+            _ => Err(qerr!("invalid type in idiv")),
         };
     }
 
@@ -494,24 +597,28 @@ impl QExp {
             .then(|| ()).ok_or(qerr!("cannot modulo by a complex value"))?;
         let N_c: QExp = convert_type_num(self, ret_type)?;
         let M_c: QExp = convert_type_num(M,    ret_type)?;
+        println!("{:?} {:?}", N_c, M_c);
         return match (N_c, M_c) {
-            (qint!(n), qint!(m)) => Ok(qint!(n % m)),
-            (qfloat!(n), qfloat!(m)) => Ok(qfloat!(n % m)),
+            (qint!(n), qint!(m)) => Ok(qint!(n.rem_euclid(m))),
+            (qfloat!(n), qfloat!(m)) => {
+                println!("{:?}", qfloat!(n.rem_euclid(m)));
+                Ok(qfloat!(n.rem_euclid(m)))
+            },
             _ => Err(qerr!("invalid type in mod")),
         };
     }
 
     pub fn eq(&self, rhs: &QExp) -> bool {
-        let ty: QExpType = cmp::max(self.exp_type(), rhs.exp_type());
-        let lhs_c: QExp = match convert_type(self, ty) {
-            Ok(l) => l,
-            Err(_) => return false,
-        };
-        let rhs_c: QExp = match convert_type(rhs,  ty) {
-            Ok(r) => r,
-            Err(_) => return false,
-        };
-        return match (lhs_c, rhs_c) {
+        // let ty: QExpType = cmp::max(self.exp_type(), rhs.exp_type());
+        // let lhs_c: QExp = match convert_type(self, ty) {
+        //     Ok(l) => l,
+        //     Err(_) => return false,
+        // };
+        // let rhs_c: QExp = match convert_type(rhs,  ty) {
+        //     Ok(r) => r,
+        //     Err(_) => return false,
+        // };
+        return match (self, rhs) {
             (qbool!(l), qbool!(r)) => l == r,
             (qint!(l), qint!(r)) => l == r,
             (qfloat!(l), qfloat!(r)) => l == r,
@@ -590,7 +697,14 @@ impl fmt::Display for QExp {
                 let n: usize = x.len();
                 write!(f, "(")?;
                 for (k, xk) in x.iter().enumerate() {
-                    xk.fmt(f)?;
+                    match xk {
+                        qstr!(s) => {
+                            write!(f, "\"")?;
+                            s.fmt(f)?;
+                            write!(f, "\"")?;
+                        },
+                        _ => { xk.fmt(f)?; },
+                    }
                     if k < n - 1 { write!(f, ", ")?; }
                 }
                 write!(f, ")")
@@ -694,6 +808,25 @@ impl Indexable {
         };
     }
 
+    fn repeat(&self, n: usize) -> QResult<QExp> {
+        return match self {
+            Indexable::List(l) => {
+                let mut acc: Vec<QExp> = Vec::new();
+                for _ in 0..n {
+                    acc.append(&mut l.clone());
+                }
+                Ok(qlist!(acc))
+            },
+            Indexable::Str(s) => {
+                let mut acc: String = String::new();
+                for _ in 0..n {
+                    acc.push_str(s);
+                }
+                Ok(qstr!(acc))
+            },
+        };
+    }
+
     fn len(&self) -> usize {
         return match self {
             Indexable::List(l) => l.len(),
@@ -706,6 +839,31 @@ impl Indexable {
             Indexable::List(l) => l.get(idx).cloned(),
             Indexable::Str(s)
                 => s.get(idx..idx + 1).map(|s| qstr!(s.to_string())),
+        };
+    }
+
+    fn set(&self, vals: &[(usize, QExp)]) -> QResult<QExp> {
+        return match self {
+            Indexable::List(l) => {
+                let mut ret: Vec<QExp> = l.clone();
+                let n: usize = ret.len();
+                vals.iter()
+                    .map(|(k, qk)| {
+                        if *k < n {
+                            ret[*k] = qk.clone();
+                            Ok(())
+                        } else {
+                            Err(qerr_fmt!(
+                                "index {} out of bounds for an object of \
+                                length {}",
+                                k, n
+                            ))
+                        }
+                    })
+                    .collect::<QResult<Vec<()>>>()
+                    .map(|_| qlist!(ret))
+            },
+            Indexable::Str(_) => Err(qerr!("cannot operate on a str")),
         };
     }
 
@@ -848,6 +1006,25 @@ impl Indexable {
         };
     }
 
+    fn cycle(&self, shift: isize) -> QResult<QExp> {
+        return match self {
+            Indexable::List(l) => {
+                let mut new = l.clone();
+                if shift > 0 {
+                    new.rotate_right(shift as usize);
+                } else if shift < 0 {
+                    new.rotate_left(shift.abs() as usize);
+                }
+                Ok(qlist!(new))
+            },
+            Indexable::Str(s) => {
+                let n: usize = s.len();
+                let d: usize = shift.rem_euclid(n as isize) as usize;
+                Ok(qstr!(s[d..n].to_string() + &s[0..n]))
+            },
+        };
+    }
+
     fn first(&self) -> QResult<QExp> {
         return match self {
             Indexable::List(l)
@@ -987,6 +1164,143 @@ impl Indexable {
                     }
                 }
                 Ok(qstr!(acc))
+            },
+        };
+    }
+
+    fn split_at(&self, idx: usize) -> QResult<QExp> {
+        return match self {
+            Indexable::List(l) => {
+                let (ll, lr): (&[QExp], &[QExp]) = l.split_at(idx);
+                Ok(qlist!(
+                    vec![
+                        qlist!(ll.iter().cloned().collect()),
+                        qlist!(lr.iter().cloned().collect()),
+                    ]
+                ))
+            },
+            Indexable::Str(s) => {
+                let (sl, sr): (&str, &str) = s.split_at(idx);
+                Ok(qlist!(vec![
+                    qstr!(sl.to_string()),
+                    qstr!(sr.to_string()),
+                ]))
+            },
+        };
+    }
+
+    fn split_on<F>(&self, mut f: F) -> QResult<QExp>
+    where F: FnMut(&[QExp]) -> QResult<QExp>
+    {
+        return match self {
+            Indexable::List(l) => {
+                let mut acc: Vec<QExp> = Vec::new();
+                let mut cur: Vec<QExp> = Vec::new();
+                for qk in l.iter() {
+                    match f(&[qk.clone()])? {
+                        qbool!(b) => {
+                            if b {
+                                acc.push(
+                                    qlist!(mem::replace(&mut cur, Vec::new()))
+                                );
+                            } else {
+                                cur.push(qk.clone());
+                            }
+                        }
+                        _ => {
+                            return Err(qerr!("predicate must return a bool"));
+                        },
+                    }
+                }
+                if !cur.is_empty() {
+                    acc.push(qlist!(cur));
+                }
+                Ok(qlist!(acc))
+            },
+            Indexable::Str(s) => {
+                let mut acc: Vec<QExp> = Vec::new();
+                let mut cur: String = String::new();
+                for sk in s.chars() {
+                    match f(&[qstr!(sk.to_string())])? {
+                        qbool!(b) => {
+                            if b {
+                                acc.push(
+                                    qstr!(
+                                        mem::replace(&mut cur, String::new())
+                                    )
+                                );
+                            } else {
+                                cur.push(sk);
+                            }
+                        }
+                        _ => {
+                            return Err(qerr!("predicate must return a bool"));
+                        },
+                    }
+                }
+                if !cur.is_empty() {
+                    acc.push(qstr!(cur));
+                }
+                Ok(qlist!(acc))
+            },
+        };
+    }
+
+    fn split_on_inc<F>(&self, mut f: F) -> QResult<QExp>
+    where F: FnMut(&[QExp]) -> QResult<QExp>
+    {
+        return match self {
+            Indexable::List(l) => {
+                let mut acc: Vec<QExp> = Vec::new();
+                let mut cur: Vec<QExp> = Vec::new();
+                for qk in l.iter() {
+                    match f(&[qk.clone()])? {
+                        qbool!(b) => {
+                            if b {
+                                cur.push(qk.clone());
+                                acc.push(
+                                    qlist!(mem::replace(&mut cur, Vec::new()))
+                                );
+                            } else {
+                                cur.push(qk.clone());
+                            }
+                        }
+                        _ => {
+                            return Err(qerr!("predicate must return a bool"));
+                        },
+                    }
+                }
+                if !cur.is_empty() {
+                    acc.push(qlist!(cur));
+                }
+                Ok(qlist!(acc))
+            },
+            Indexable::Str(s) => {
+                let mut acc: Vec<QExp> = Vec::new();
+                let mut cur: String = String::new();
+                for sk in s.chars() {
+                    match f(&[qstr!(sk.to_string())])? {
+                        qbool!(b) => {
+                            if b {
+                                cur.push(sk);
+                                acc.push(
+                                    qstr!(
+                                        mem::replace(&mut cur, String::new())
+                                    )
+                                );
+                            } else {
+                                cur.push(sk);
+                            }
+                        }
+                        _ => {
+                            return Err(qerr!("predicate must return a bool"));
+                        },
+                    }
+                }
+                if !cur.is_empty() {
+                    acc.push(qstr!(cur));
+                }
+                Ok(qlist!(acc))
             },
         };
     }
@@ -1198,6 +1512,27 @@ impl Indexable {
         };
     }
 
+    fn unique(&self) -> QResult<QExp> {
+        return match self {
+            Indexable::List(l) => {
+                let mut acc: Vec<QExp> = Vec::new();
+                l.iter()
+                    .for_each(|qk| {
+                        if !acc.contains(qk) { acc.push(qk.clone()); }
+                    });
+                Ok(qlist!(acc))
+            },
+            Indexable::Str(s) => {
+                let mut acc: String = String::new();
+                s.chars()
+                    .for_each(|ck| {
+                        if !acc.contains(ck) { acc.push(ck); }
+                    });
+                Ok(qstr!(acc))
+            },
+        };
+    }
+
     fn flatten_qexp(exps: &[QExp]) -> Vec<QExp> {
         let mut ret: Vec<QExp> = Vec::new();
         for q in exps.iter() {
@@ -1253,6 +1588,37 @@ impl Indexable {
         };
     }
 
+    fn index_of(&self, exp: &QExp) -> QResult<QExp> {
+        return match self {
+            Indexable::List(l) => {
+                for (k, qk) in l.iter().enumerate() {
+                    if exp.eq(qk) { return Ok(qint!(k as i64)); }
+                }
+                Ok(qint!(-1))
+            },
+            Indexable::Str(s) => {
+                match exp {
+                    qstr!(sp) => {
+                        if sp.len() > s.len() {
+                            Ok(qint!(-1))
+                        } else if sp.len() == s.len() {
+                            Ok(qint!(if sp == s { -1 } else { 0 }))
+                        } else {
+                            let n: usize = sp.len();
+                            for k in 0..s.len() - sp.len() {
+                                if sp == s.get(k..k + n).unwrap() {
+                                    return Ok(qint!(k as i64));
+                                }
+                            }
+                            Ok(qint!(-1))
+                        }
+                    },
+                    _ => Err(qerr!("strs can only contain other strs")),
+                }
+            },
+        };
+    }
+
     fn fold<F>(&self, start: &QExp, mut f: F) -> QResult<QExp>
     where F: FnMut(&[QExp]) -> QResult<QExp>
     {
@@ -1271,16 +1637,15 @@ impl Indexable {
     fn min(&self) -> QResult<QExp> {
         return match self {
             Indexable::List(l) => {
-                let mut m: QExp
+                let mut m: &QExp
                     = l.first()
-                    .ok_or(qerr!("expected non-empty list or str"))?
-                    .clone();
+                    .ok_or(qerr!("expected non-empty list or str"))?;
                 for qk in l.iter() {
-                    if qk.lt(&m)? {
-                        m = qk.clone();
+                    if qk.lt(m)? {
+                        m = qk;
                     }
                 }
-                Ok(m)
+                Ok(m.clone())
             },
             Indexable::Str(s) => {
                 let mut m: QExp
@@ -1302,16 +1667,15 @@ impl Indexable {
     fn max(&self) -> QResult<QExp> {
         return match self {
             Indexable::List(l) => {
-                let mut m: QExp
+                let mut m: &QExp
                     = l.first()
-                    .ok_or(qerr!("expected non-empty list or str"))?
-                    .clone();
+                    .ok_or(qerr!("expected non-empty list or str"))?;
                 for qk in l.iter() {
                     if qk.gt(&m)? {
-                        m = qk.clone();
+                        m = qk;
                     }
                 }
-                Ok(m)
+                Ok(m.clone())
             },
             Indexable::Str(s) => {
                 let mut m: QExp
@@ -1328,6 +1692,274 @@ impl Indexable {
                 Ok(m)
             },
         };
+    }
+
+    fn select_by<F>(&self, mut f: F) -> QResult<QExp>
+    where F: FnMut(&[QExp]) -> QResult<QExp>
+    {
+        return match self {
+            Indexable::List(l) => {
+                let mut m: &QExp
+                    = l.first()
+                    .ok_or(qerr!("expected non-empty list or str"))?;
+                for qk in l.iter().skip(1) {
+                    match f(&[qk.clone(), m.clone()])? {
+                        qbool!(b) => { if b { m = qk; } },
+                        _ => {
+                            return Err(qerr!(
+                                "comparison function must return a bool"));
+                        },
+                    }
+                }
+                Ok(m.clone())
+            },
+            Indexable::Str(s) => {
+                let mut m: QExp
+                    = s.get(0..1)
+                    .map(|s0| qstr!(s0.to_string()))
+                    .ok_or(qerr!("expected non-empty list or str"))?;
+                let mut sk: QExp;
+                for ck in s.chars().skip(1) {
+                    sk = qstr!(ck.to_string());
+                    match f(&[sk.clone(), m.clone()])? {
+                        qbool!(b) => { if b { m = sk; } },
+                        _ => {
+                            return Err(qerr!(
+                                "comparison function must return a bool"));
+                        },
+                    }
+                }
+                Ok(m)
+            },
+        };
+    }
+
+    fn merge_sort_list(items: &[QExp]) -> QResult<Vec<&QExp>> {
+        return if items.len() <= 1 {
+            Ok(items.iter().collect())
+        } else {
+            let n: usize = items.len();
+            let L: Vec<&QExp> = Indexable::merge_sort_list(&items[0..n / 2])?;
+            let mut L_iter = L.iter();
+            let R: Vec<&QExp> = Indexable::merge_sort_list(&items[n / 2..n])?;
+            let mut R_iter = R.iter();
+            let mut acc: Vec<&QExp> = Vec::with_capacity(n);
+            let mut l: Option<&&QExp> = L_iter.next();
+            let mut r: Option<&&QExp> = R_iter.next();
+            loop {
+                if let (Some(&lk), Some(&rk)) = (l, r) {
+                    if lk.le(rk)? {
+                        acc.push(lk);
+                        l = L_iter.next();
+                    } else {
+                        acc.push(rk);
+                        r = R_iter.next();
+                    }
+                } else if let (Some(&lk), None) = (l, r) {
+                    acc.push(lk);
+                    l = L_iter.next();
+                } else if let (None, Some(&rk)) = (l, r) {
+                    acc.push(rk);
+                    r = R_iter.next();
+                } else {
+                    break;
+                }
+            }
+            Ok(acc)
+        };
+    }
+
+    fn merge_sort_str(chars: &str) -> QResult<String> {
+        return if chars.len() <= 1 {
+            Ok(chars.chars().collect())
+        } else {
+            let n: usize = chars.len();
+            let L: String
+                = Indexable::merge_sort_str(chars.get(0..n / 2).unwrap())?;
+            let mut L_iter = L.chars();
+            let R: String
+                = Indexable::merge_sort_str(chars.get(n / 2..n).unwrap())?;
+            let mut R_iter = R.chars();
+            let mut acc: String = String::with_capacity(n);
+            let mut l: Option<char> = L_iter.next();
+            let mut r: Option<char> = R_iter.next();
+            loop {
+                if let (Some(lk), Some(rk)) = (l, r) {
+                    if lk <= rk {
+                        acc.push(lk);
+                        l = L_iter.next();
+                    } else {
+                        acc.push(rk);
+                        r = R_iter.next();
+                    }
+                } else if let (Some(lk), None) = (l, r) {
+                    acc.push(lk);
+                    l = L_iter.next();
+                } else if let (None, Some(rk)) = (l, r) {
+                    acc.push(rk);
+                    r = R_iter.next();
+                } else {
+                    break;
+                }
+            }
+            Ok(acc)
+        };
+    }
+
+    fn sort(&self) -> QResult<QExp> {
+        return match self {
+            Indexable::List(l) => Ok(qlist!(
+                Indexable::merge_sort_list(l)?.into_iter().cloned().collect()
+            )),
+            Indexable::Str(s) => Ok(qstr!(
+                Indexable::merge_sort_str(s)?
+            )),
+        };
+    }
+
+    fn merge_sort_list_by<'a, F>(items: &'a [QExp], f: &mut F)
+        -> QResult<Vec<&'a QExp>>
+    where F: FnMut(&[QExp]) -> QResult<QExp>
+    {
+        return if items.len() <= 1 {
+            Ok(items.iter().collect())
+        } else {
+            let n: usize = items.len();
+            let L: Vec<&QExp>
+                = Indexable::merge_sort_list_by(&items[0..n / 2], f)?;
+            let mut L_iter = L.iter();
+            let R: Vec<&QExp>
+                = Indexable::merge_sort_list_by(&items[n / 2..n], f)?;
+            let mut R_iter = R.iter();
+            let mut acc: Vec<&QExp> = Vec::with_capacity(n);
+            let mut l: Option<&&QExp> = L_iter.next();
+            let mut r: Option<&&QExp> = R_iter.next();
+            loop {
+                if let (Some(&lk), Some(&rk)) = (l, r) {
+                    match f(&[lk.clone(), rk.clone()])? {
+                        qbool!(b) => {
+                            if !b {
+                                acc.push(rk);
+                                r = R_iter.next();
+                            } else {
+                                acc.push(lk);
+                                l = L_iter.next();
+                            }
+                        },
+                        _ => {
+                            return Err(qerr!(
+                                "comparison function must return a bool"))
+                        },
+                    }
+                } else if let (Some(&lk), None) = (l, r) {
+                    acc.push(lk);
+                    l = L_iter.next();
+                } else if let (None, Some(&rk)) = (l, r) {
+                    acc.push(rk);
+                    r = R_iter.next();
+                } else {
+                    break;
+                }
+            }
+            Ok(acc)
+        };
+    }
+
+    fn merge_sort_str_by<F>(chars: &str, f: &mut F) -> QResult<String>
+    where F: FnMut(&[QExp]) -> QResult<QExp>
+    {
+        return if chars.len() <= 1 {
+            Ok(chars.chars().collect())
+        } else {
+            let n: usize = chars.len();
+            let L: String
+                = Indexable::merge_sort_str_by(
+                    chars.get(0..n / 2).unwrap(), f)?;
+            let mut L_iter = L.chars();
+            let R: String
+                = Indexable::merge_sort_str_by(
+                    chars.get(n / 2..n).unwrap(), f)?;
+            let mut R_iter = R.chars();
+            let mut acc: String = String::with_capacity(n);
+            let mut l: Option<char> = L_iter.next();
+            let mut r: Option<char> = R_iter.next();
+            loop {
+                if let (Some(lk), Some(rk)) = (l, r) {
+                    match f(&[qstr!(lk.to_string()), qstr!(rk.to_string())])? {
+                        qbool!(b) => {
+                            if !b {
+                                acc.push(rk);
+                                r = R_iter.next();
+                            } else {
+                                acc.push(lk);
+                                l = L_iter.next();
+                            }
+                        },
+                        _ => {
+                            return Err(qerr!(
+                                "comparison function must return a bool"))
+                        },
+                    }
+                } else if let (Some(lk), None) = (l, r) {
+                    acc.push(lk);
+                    l = L_iter.next();
+                } else if let (None, Some(rk)) = (l, r) {
+                    acc.push(rk);
+                    r = R_iter.next();
+                } else {
+                    break;
+                }
+            }
+            Ok(acc)
+        };
+    }
+
+    fn sort_by<F>(&self, mut f: F) -> QResult<QExp>
+    where F: FnMut(&[QExp]) -> QResult<QExp>
+    {
+        return match self {
+            Indexable::List(l) => Ok(qlist!(
+                Indexable::merge_sort_list_by(l, &mut f)?
+                    .into_iter().cloned().collect()
+            )),
+            Indexable::Str(s) => Ok(qstr!(
+                Indexable::merge_sort_str_by(s, &mut f)?
+            )),
+        };
+    }
+
+    fn permute(&self, moves: &[Vec<usize>]) -> QResult<QExp> {
+        return if let Indexable::List(l) = self {
+            let n: usize = self.len();
+            let mut to: Vec<usize>;
+            let mut ret: Vec<QExp> = l.iter().cloned().collect();
+            for p in moves.iter() {
+                if p.len() < 2 {
+                    return Err(qerr!(
+                        "permutation spec must be at least 2 items"));
+                }
+                to = Vec::with_capacity(p.len());
+                for pk in p.iter() {
+                    if to.contains(pk) {
+                        return Err(qerr!(
+                            "permutations can contain each index at most once"
+                        ));
+                    } else if *pk >= n {
+                        return Err(qerr_fmt!(
+                            "invalid index {} for object of length {}", pk, n
+                        ));
+                    } else {
+                        to.push(*pk);
+                    }
+                }
+                to.rotate_left(1);
+                p.iter().zip(to.iter()).rev().take(p.len() - 1)
+                    .for_each(|(&a, &b)| ret.swap(a, b));
+            }
+            Ok(qlist!(ret))
+        } else {
+            Err(qerr!("can only permute lists"))
+        }
     }
 }
 
@@ -1544,6 +2176,8 @@ impl<'a> Default for QEnv<'a> {
         add_fn!( env,   "*",        fns::fn_mul     );
         add_fn!( env,   "div",      fns::fn_div     );
         add_fn!( env,   "/",        fns::fn_div     );
+        add_fn!( env,   "idiv",     fns::fn_idiv    );
+        add_fn!( env,   "//",       fns::fn_idiv    );
         add_fn!( env,   "eq",       fns::fn_eq      );
         add_fn!( env,   "=",        fns::fn_eq      );
         add_fn!( env,   "neq",      fns::fn_neq     );
@@ -1560,6 +2194,8 @@ impl<'a> Default for QEnv<'a> {
         add_fn!( env,   "++",       fns::fn_join    );
         add_fn!( env,   "zip",      fns::fn_zip     );
         add_fn!( env,   "::",       fns::fn_zip     );
+        add_fn!( env,   "cart",     fns::fn_cart    );
+        add_fn!( env,   ":*:",      fns::fn_cart    );
         add_fn!( env,   "bool",     fns::fn_bool    );
         add_fn!( env,   "int",      fns::fn_int     );
         add_fn!( env,   "float",    fns::fn_float   );
@@ -1856,13 +2492,19 @@ impl<'a> QEnv<'a> {
         if arg_forms.len() > 1 {
             return Err(qerr!("all must have exactly one argument"));
         }
-        return match arg_forms.first().unwrap() {
-            qlist!(exps) => self.eval_and(exps),
-            qsymbol!(s) => match self.get_ok_cloned(s)? {
-                qlist!(exp) => self.eval_and(&exp),
-                _ => Err(qerr!("all argument must be a list")),
+        return match self.eval(arg_forms.first().unwrap())? {
+            qlist!(l) => {
+                if l.is_empty() { return Ok(qbool!(false)); }
+                for qk in l.iter() {
+                    if let qbool!(b) = qk {
+                        if !b { return Ok(qbool!(false)); }
+                    } else {
+                        return Err(qerr!("all: encountered non-boolean"));
+                    }
+                }
+                Ok(qbool!(true))
             },
-            _ => Err(qerr!("all argument must be a list")),
+            _ => Err(qerr!("all: arg must be a list")),
         };
     }
 
@@ -1883,13 +2525,19 @@ impl<'a> QEnv<'a> {
         if arg_forms.len() > 1 {
             return Err(qerr!("any must have exactly one argument"));
         }
-        return match arg_forms.first().unwrap() {
-            qlist!(exps) => self.eval_or(exps),
-            qsymbol!(s) => match self.get_ok_cloned(s)? {
-                qlist!(exp) => self.eval_or(&exp),
-                _ => Err(qerr!("any argument must be a list")),
+        return match self.eval(arg_forms.first().unwrap())? {
+            qlist!(l) => {
+                if l.is_empty() { return Ok(qbool!(false)); }
+                for qk in l.iter() {
+                    if let qbool!(b) = qk {
+                        if *b { return Ok(qbool!(true)); }
+                    } else {
+                        return Err(qerr!("any: encountered non-boolean"));
+                    }
+                }
+                Ok(qbool!(false))
             },
-            _ => Err(qerr!("any argument must be a list")),
+            _ => Err(qerr!("any: arg must be a list")),
         };
     }
 
@@ -1933,11 +2581,17 @@ impl<'a> QEnv<'a> {
             ));
         }
         return if arg_forms.len() == 1 {
-            self.eval(arg_forms.get(0).unwrap())?.neg()
+            match self.eval(arg_forms.first().unwrap())? {
+                qlist!(l) => self.eval_neg(&l),
+                q => q.neg(),
+            }
         } else {
             let evaled: Vec<QExp> = self.eval_forms(arg_forms)?;
             return evaled.into_iter()
-                .map(|qk| qk.neg())
+                .map(|qk| match qk {
+                    qlist!(l) => self.eval_neg(&l),
+                    qexp => qexp.neg(),
+                })
                 .collect::<QResult<Vec<QExp>>>()
                 .map(|v| qlist!(v))
                 .map_err(|e| e.prepend_source("neg"));
@@ -2033,6 +2687,27 @@ impl<'a> QEnv<'a> {
         };
     }
 
+    pub fn eval_repeat(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
+        if arg_forms.len() != 2 {
+            return Err(qerr_fmt!(
+                "repeat: expected 2 args but got {}", arg_forms.len()));
+        }
+        let n: usize = match self.eval(arg_forms.get(0).unwrap())? {
+            qint!(i) => {
+                if i >= 0 {
+                    Ok(i as usize)
+                } else {
+                    Err(qerr!("repeat: number must be at least zero"))
+                }
+            },
+            _ => Err(qerr!("repeat: first arg must be an int")),
+        }?;
+        let idxable
+            = Indexable::from_qexp(self.eval(arg_forms.get(1).unwrap())?)
+            .map_err(|_| qerr!("repeat: second arg must be a list or str"))?;
+        return idxable.repeat(n);
+    }
+
     pub fn eval_length(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
         if arg_forms.len() != 1 {
             return Err(qerr_fmt!(
@@ -2065,6 +2740,42 @@ impl<'a> QEnv<'a> {
                 "get: index {} out of bounds for object of length {}",
                 idx, idxable.len()
             ));
+    }
+
+    pub fn eval_set(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
+        if arg_forms.len() < 2 {
+            return Err(qerr_fmt!(
+                "set: expected at least 2 args but got {}", arg_forms.len()));
+        }
+        let vals: Vec<(usize, QExp)>
+            = self.eval_forms(&arg_forms[1..])?
+            .into_iter()
+            .map(|qk| match qk {
+                qlist!(l) => {
+                    if l.len() == 2 {
+                        let mut l_ = l.into_iter();
+                        match (l_.next().unwrap(), l_.next().unwrap()) {
+                            (qint!(k), q) => {
+                                if k < 0 {
+                                    Err(qerr_fmt!("set: invalid index {}", k))
+                                } else {
+                                    Ok((k as usize, q))
+                                }
+                            },
+                            _ => Err(qerr!("set: invalid arg form")),
+                        }
+                    } else {
+                        Err(qerr!("set: args must be lists of length 2"))
+                    }
+                }
+                _ => Err(qerr!("set: args must be lists of length 2")),
+            })
+            .collect::<QResult<Vec<(usize, QExp)>>>()?;
+        let idxable
+            = Indexable::from_qexp_list(self.eval(arg_forms.get(0).unwrap())?)
+            .map_err(|_| qerr!("set: first arg must be a list"))?;
+        return idxable.set(&vals)
+            .map_err(|e| e.prepend_source("set"));
     }
 
     pub fn eval_slice(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
@@ -2144,7 +2855,7 @@ impl<'a> QEnv<'a> {
             return Err(qerr!("slice-by: step must be positibe"));
         }
         let idxable
-            = Indexable::from_qexp(self.eval(arg_forms.get(2).unwrap())?)
+            = Indexable::from_qexp(self.eval(arg_forms.get(3).unwrap())?)
             .map_err(|_| qerr!("slice-by: third arg must be a list or str"))?;
         return idxable.slice(
             beg.abs() as usize, end.abs() as usize, step.abs() as usize);
@@ -2177,7 +2888,7 @@ impl<'a> QEnv<'a> {
             return Err(qerr!("slice-inc-by: step must be positive"));
         }
         let idxable
-            = Indexable::from_qexp(self.eval(arg_forms.get(2).unwrap())?)
+            = Indexable::from_qexp(self.eval(arg_forms.get(3).unwrap())?)
             .map_err(|_| {
                 qerr!("slice-inc-by: third arg must be a list or str")
             })?;
@@ -2261,6 +2972,22 @@ impl<'a> QEnv<'a> {
             = Indexable::from_qexp(self.eval(arg_forms.get(0).unwrap())?)
             .map_err(|e| e.prepend_source("reverse"))?;
         return idxable.reverse();
+    }
+
+    pub fn eval_cycle(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
+        if arg_forms.len() != 2 {
+            return Err(qerr_fmt!(
+                "cycle: expected 2 args but got {}", arg_forms.len()));
+        }
+        let shift: isize = match self.eval(arg_forms.get(0).unwrap())? {
+            qint!(i) => Ok(i as isize),
+            _ => Err(qerr!("cycle: first arg must be an int")),
+        }?;
+        let idxable
+            = Indexable::from_qexp(self.eval(arg_forms.get(1).unwrap())?)
+            .map_err(|_| qerr!("cycle: second arg must be a list or str"))?;
+        return idxable.cycle(shift)
+            .map_err(|e| e.prepend_source("cycle"));
     }
 
     pub fn eval_first(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
@@ -2373,6 +3100,75 @@ impl<'a> QEnv<'a> {
         };
     }
 
+    pub fn eval_split_at(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
+        if arg_forms.len() != 2 {
+            return Err(qerr_fmt!(
+                "split-at: expected 2 args but got {}", arg_forms.len()));
+        }
+        let idx: usize = match self.eval(arg_forms.first().unwrap())? {
+            qint!(i) => {
+                if i >= 0 {
+                    Ok(i as usize)
+                } else {
+                    Err(qerr!("split-at: index must be non-negative"))
+                }
+            },
+            _ => Err(qerr!("split-at: first arg must be an int")),
+        }?;
+        let idxable
+            = Indexable::from_qexp(self.eval(arg_forms.get(1).unwrap())?)
+            .map_err(|_| {
+                qerr!("split-at: second arg must be a list or str")
+            })?;
+        return idxable.split_at(idx);
+    }
+
+    pub fn eval_split_on(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
+        if arg_forms.len() != 2 {
+            return Err(qerr_fmt!(
+                "split-on: expected 2 args but got {}", arg_forms.len()));
+        }
+        let idxable
+            = Indexable::from_qexp(self.eval(arg_forms.get(1).unwrap())?)
+            .map_err(|_| {
+                qerr!("split-on: second arg must eb a list or str")
+        })?;
+        return match self.eval(arg_forms.get(0).unwrap())? {
+            qfunc!(f) => idxable.split_on(f),
+            qlambda!(ll) => {
+                let f = |args: &[QExp]| {
+                    let mut ll_env: QEnv = ll.env(args, self)?;
+                    ll_env.eval(&ll.body_exp)
+                };
+                idxable.split_on(f)
+            },
+            _ => Err(qerr!("split-on: first arg must be a function")),
+        };
+    }
+
+    pub fn eval_split_on_inc(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
+        if arg_forms.len() != 2 {
+            return Err(qerr_fmt!(
+                "split-on-inc: expected 2 args but got {}", arg_forms.len()));
+        }
+        let idxable
+            = Indexable::from_qexp(self.eval(arg_forms.get(1).unwrap())?)
+            .map_err(|_| {
+                qerr!("split-on-inc: second arg must eb a list or str")
+        })?;
+        return match self.eval(arg_forms.get(0).unwrap())? {
+            qfunc!(f) => idxable.split_on_inc(f),
+            qlambda!(ll) => {
+                let f = |args: &[QExp]| {
+                    let mut ll_env: QEnv = ll.env(args, self)?;
+                    ll_env.eval(&ll.body_exp)
+                };
+                idxable.split_on_inc(f)
+            },
+            _ => Err(qerr!("split-on-inc: first arg must be a function")),
+        };
+    }
+
     pub fn eval_append(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
         if arg_forms.len() < 2 {
             return Err(qerr!("append: expected at least 2 args"));
@@ -2458,6 +3254,18 @@ impl<'a> QEnv<'a> {
         };
     }
 
+    pub fn eval_unique(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
+        if arg_forms.len() != 1 {
+            return Err(qerr_fmt!(
+                "unique: expected 1 arg but got {}", arg_forms.len()));
+        }
+        let idxable
+            = Indexable::from_qexp(self.eval(arg_forms.get(0).unwrap())?)
+            .map_err(|e| e.prepend_source("unique"))?;
+        return idxable.unique()
+            .map_err(|e| e.prepend_source("unique"));
+    }
+
     pub fn eval_flatten(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
         if arg_forms.len() != 1 {
             return Err(qerr_fmt!(
@@ -2481,6 +3289,21 @@ impl<'a> QEnv<'a> {
         } else {
             idxable.contains(&self.eval(arg_forms.get(1).unwrap())?)
         }
+    }
+
+    pub fn eval_index_of(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
+        if arg_forms.len() != 2 {
+            return Err(qerr_fmt!(
+                "index-of: expected 2 args but got {}", arg_forms.len()));
+        }
+        let item: QExp
+            = self.eval(arg_forms.get(1).unwrap())
+            .map_err(|e| e.prepend_source("index-of"))?;
+        let idxable
+            = Indexable::from_qexp(self.eval(arg_forms.get(0).unwrap())?)
+            .map_err(|_| qerr!("index-of: second arg must be a str or list"))?;
+        return idxable.index_of(&item)
+            .map_err(|e| e.prepend_source("index-of"));
     }
 
     pub fn eval_fold(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
@@ -2527,6 +3350,96 @@ impl<'a> QEnv<'a> {
         return idxable.max();
     }
 
+    pub fn eval_select_by(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
+       if arg_forms.len() != 2 {
+           return Err(qerr_fmt!(
+                "select-by: expected 2 args but got {}", arg_forms.len()));
+       }
+       let idxable
+           = Indexable::from_qexp(self.eval(arg_forms.get(1).unwrap())?)
+           .map_err(|_| qerr!("select-by: second arg must be a list or str"))?;
+        return match self.eval(arg_forms.get(0).unwrap())? {
+            qfunc!(f) => idxable.select_by(f),
+            qlambda!(ll) => {
+                let f = |args: &[QExp]| {
+                    let mut ll_env: QEnv = ll.env(args, self)?;
+                    ll_env.eval(&ll.body_exp)
+                };
+                idxable.select_by(f)
+            },
+            _ => Err(qerr!("select-by: second arg must be a function")),
+       };
+    }
+
+    pub fn eval_sort(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
+        if arg_forms.len() != 1 {
+            return Err(qerr_fmt!(
+                "sort: expected 1 arg but got {}", arg_forms.len()));
+        }
+        let idxable
+            = Indexable::from_qexp(self.eval(arg_forms.first().unwrap())?)
+            .map_err(|e| e.prepend_source("sort"))?;
+        return idxable.sort();
+    }
+
+    pub fn eval_sort_by(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
+        if arg_forms.len() != 2 {
+            return Err(qerr_fmt!(
+                "sort-by: expected 2 args but got {}", arg_forms.len()));
+        }
+        let idxable
+            = Indexable::from_qexp(self.eval(arg_forms.get(1).unwrap())?)
+            .map_err(|_| qerr!("sort-by: second arg must be a list or str"))?;
+        return match self.eval(arg_forms.get(0).unwrap())? {
+            qfunc!(f) => idxable.sort_by(f),
+            qlambda!(ll) => {
+                let f = |args: &[QExp]| {
+                    let mut ll_env: QEnv = ll.env(args, self)?;
+                    ll_env.eval(&ll.body_exp)
+                };
+                idxable.sort_by(f)
+            },
+            _ => Err(qerr!("sort-by: first arg must be a function")),
+        };
+    }
+
+    pub fn eval_permute(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
+        if arg_forms.len() < 2 {
+            return Err(qerr_fmt!(
+                "permute: expected at least 2 args but got {}",
+                arg_forms.len()
+            ));
+        }
+        let idxable
+            = Indexable::from_qexp_list(self.eval(arg_forms.get(0).unwrap())?)
+            .map_err(|_| qerr!("permute: first arg must be a list"))?;
+        let moves: Vec<Vec<usize>>
+            = self.eval_forms(&arg_forms[1..])?
+            .into_iter()
+            .map(|qk| match qk {
+                qlist!(l) => {
+                    l.into_iter()
+                        .map(|lk| match lk {
+                            qint!(i) => {
+                                if i >= 0 {
+                                    Ok(i as usize)
+                                } else {
+                                    Err(qerr_fmt!(
+                                        "permute: invalid index {}", i))
+                                }
+                            }
+                            _ => Err(qerr!(
+                                "permutations must be lists of indices")),
+                        })
+                        .collect::<QResult<Vec<usize>>>()
+                },
+                _ => Err(qerr!("permutations must be lists of indices")),
+            })
+            .collect::<QResult<Vec<Vec<usize>>>>()?;
+        return idxable.permute(&moves)
+            .map_err(|e| e.prepend_source("permute"));
+    }
+
     pub fn eval_format(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
         if arg_forms.len() < 1 {
             return Err(qerr!("format: missing format str"));
@@ -2545,6 +3458,9 @@ impl<'a> QEnv<'a> {
                 _ => Err(qerr!("format: first arg must be a format string")),
             }?;
         arg_forms.iter().skip(1)
+            .map(|qk| self.eval(qk))
+            .collect::<QResult<Vec<QExp>>>()?
+            .iter()
             .for_each(|qk| fmt.replace_positional(qk));
         return fmt.text()
             .map(|s| qstr!(s))
@@ -2554,23 +3470,35 @@ impl<'a> QEnv<'a> {
     }
 
     pub fn eval_print(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
-        return self.eval_format(arg_forms)
+        self.eval_format(arg_forms)
             .map(|fmtstr| {
                 print!("{}", fmtstr);
                 std::io::Write::flush(&mut std::io::stdout()).unwrap();
                 fmtstr
             })
-            .map_err(|e| e.prepend_source("print"));
+            .map_err(|e| e.prepend_source("print"))?;
+        let vals: Vec<QExp> = self.eval_forms(&arg_forms[1..])?;
+        return if vals.len() == 1 {
+            Ok(vals.into_iter().next().unwrap())
+        } else {
+            Ok(qlist!(vals))
+        };
     }
 
     pub fn eval_println(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
-        return self.eval_format(arg_forms)
+        self.eval_format(arg_forms)
             .map(|fmtstr| {
                 println!("{}", fmtstr);
                 std::io::Write::flush(&mut std::io::stdout()).unwrap();
                 fmtstr
             })
-            .map_err(|e| e.prepend_source("println"));
+            .map_err(|e| e.prepend_source("println"))?;
+        let vals: Vec<QExp> = self.eval_forms(&arg_forms[1..])?;
+        return if vals.len() == 1 {
+            Ok(vals.into_iter().next().unwrap())
+        } else {
+            Ok(qlist!(vals))
+        };
     }
 
     pub fn eval_halt(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
@@ -2578,6 +3506,85 @@ impl<'a> QEnv<'a> {
             Ok(msg) => Err(qerr_fmt!("halt: {}", msg)),
             Err(e) => Err(e.prepend_source("halt")),
         };
+    }
+
+    pub fn eval_istype(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
+        if arg_forms.len() != 2 {
+            return Err(qerr_fmt!(
+                "istype: expected 2 args but got {}", arg_forms.len()));
+        }
+        let typespec: Vec<QExpType>
+            = match self.eval(arg_forms.get(0).unwrap())? {
+                qstr!(s) => {
+                    match s.as_str() {
+                        "bool" => Ok(vec![qbool!()]),
+                        "int" => Ok(vec![qint!()]),
+                        "float" => Ok(vec![qfloat!()]),
+                        "complex" => Ok(vec![qcomplex!()]),
+                        "list" => Ok(vec![qlist!()]),
+                        "str" => Ok(vec![qstr!()]),
+                        "function" => Ok(vec![qfunc!(), qlambda!()]),
+                        "any" => Ok(vec![qany!()]),
+                        _ => Err(qerr_fmt!(
+                            "istype: invalid type specification {}", s)),
+                    }
+                },
+                qlist!(l) => {
+                    let ty: Vec<QExpType>
+                        = l.iter()
+                        .map(|qk| match qk {
+                            qstr!(s) => {
+                                match s.as_str() {
+                                    "bool" => Ok(vec![qbool!()]),
+                                    "int" => Ok(vec![qint!()]),
+                                    "float" => Ok(vec![qfloat!()]),
+                                    "complex" => Ok(vec![qcomplex!()]),
+                                    "list" => Ok(vec![qlist!()]),
+                                    "str" => Ok(vec![qstr!()]),
+                                    "function"
+                                        => Ok(vec![qfunc!(), qlambda!()]),
+                                    "any" => Ok(vec![qany!()]),
+                                    _ => Err(qerr_fmt!(
+                                        "istype: invalid type specification {}",
+                                        s
+                                    )),
+                                }
+                            },
+                            _ => Err(qerr_fmt!(
+                                "istype: invalid type specification {}", qk)),
+                        })
+                        .collect::<QResult<Vec<Vec<QExpType>>>>()?
+                        .into_iter()
+                        .flat_map(|v| v.into_iter())
+                        .collect();
+                    Ok(ty)
+                },
+                _ => Err(qerr!(
+                    "istype: first arg must be a str or a list of strs")),
+            }?;
+        let ret: bool
+            = self.eval(arg_forms.get(1).unwrap())
+            .map_err(|e| e.prepend_source("istype"))?
+            .is_type_user(&typespec);
+        return Ok(qbool!(ret));
+    }
+
+    pub fn eval_type(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
+        if arg_forms.len() < 1 {
+            return Err(qerr_fmt!(
+                "type: expected at least 1 arg but got {}", arg_forms.len()));
+        }
+        let vals: Vec<QExp> = self.eval_forms(arg_forms)?;
+        if vals.len() == 1 {
+            return vals[0].exp_type_user()
+                .map_err(|e| e.prepend_source("type"));
+        } else {
+            return Ok(qlist!(
+                vals.iter().map(|qk| qk.exp_type_user())
+                .collect::<QResult<Vec<QExp>>>()
+                .map_err(|e| e.prepend_source("type"))?
+            ));
+        }
     }
 
     pub fn eval_builtin(&mut self, exp: &QExp, arg_forms: &[QExp])
@@ -2590,9 +3597,9 @@ impl<'a> QEnv<'a> {
                 "let"           => Some(self.eval_let(arg_forms)),
                 ":=*"           => Some(self.eval_let(arg_forms)),
                 "fn"            => Some(self.eval_fn(arg_forms)),
-                "`"             => Some(self.eval_fn(arg_forms)),
+                "@:"            => Some(self.eval_fn(arg_forms)),
                 "defn"          => Some(self.eval_defn(arg_forms)),
-                ":`"            => Some(self.eval_defn(arg_forms)),
+                "@:="           => Some(self.eval_defn(arg_forms)),
                 "if"            => Some(self.eval_if(arg_forms)),
                 "=>"            => Some(self.eval_if(arg_forms)),
                 "and"           => Some(self.eval_and(arg_forms)),
@@ -2615,10 +3622,14 @@ impl<'a> QEnv<'a> {
                 ".."            => Some(self.eval_range(arg_forms)),
                 "range-inc"     => Some(self.eval_range_inc(arg_forms)),
                 "..="           => Some(self.eval_range_inc(arg_forms)),
+                "repeat"        => Some(self.eval_repeat(arg_forms)),
+                "#="            => Some(self.eval_repeat(arg_forms)),
                 "length"        => Some(self.eval_length(arg_forms)),
                 "#"             => Some(self.eval_length(arg_forms)),
                 "get"           => Some(self.eval_get(arg_forms)),
                 "."             => Some(self.eval_get(arg_forms)),
+                "set"           => Some(self.eval_set(arg_forms)),
+                ".:="           => Some(self.eval_set(arg_forms)),
                 "slice"         => Some(self.eval_slice(arg_forms)),
                 "--"            => Some(self.eval_slice(arg_forms)),
                 "slice-inc"     => Some(self.eval_slice_inc(arg_forms)),
@@ -2635,6 +3646,8 @@ impl<'a> QEnv<'a> {
                 ".*"            => Some(self.eval_pick(arg_forms)),
                 "reverse"       => Some(self.eval_reverse(arg_forms)),
                 "<>"            => Some(self.eval_reverse(arg_forms)),
+                "cycle"         => Some(self.eval_cycle(arg_forms)),
+                "<#>"           => Some(self.eval_cycle(arg_forms)),
                 "first"         => Some(self.eval_first(arg_forms)),
                 ".-"            => Some(self.eval_first(arg_forms)),
                 "take"          => Some(self.eval_take(arg_forms)),
@@ -2647,6 +3660,12 @@ impl<'a> QEnv<'a> {
                 ".~"            => Some(self.eval_skip(arg_forms)),
                 "skip-while"    => Some(self.eval_skip_while(arg_forms)),
                 ".~@"           => Some(self.eval_skip_while(arg_forms)),
+                "split-at"      => Some(self.eval_split_at(arg_forms)),
+                "|."            => Some(self.eval_split_at(arg_forms)),
+                "split-on"      => Some(self.eval_split_on(arg_forms)),
+                "|@"            => Some(self.eval_split_on(arg_forms)),
+                "split-on-inc"  => Some(self.eval_split_on_inc(arg_forms)),
+                "|@="           => Some(self.eval_split_on_inc(arg_forms)),
                 "append"        => Some(self.eval_append(arg_forms)),
                 "+."            => Some(self.eval_append(arg_forms)),
                 "prepend"       => Some(self.eval_prepend(arg_forms)),
@@ -2657,16 +3676,28 @@ impl<'a> QEnv<'a> {
                 "@"             => Some(self.eval_map(arg_forms)),
                 "filter"        => Some(self.eval_filter(arg_forms)),
                 "@!"            => Some(self.eval_filter(arg_forms)),
+                "unique"        => Some(self.eval_unique(arg_forms)),
+                "*!="           => Some(self.eval_unique(arg_forms)),
                 "flatten"       => Some(self.eval_flatten(arg_forms)),
                 "__"            => Some(self.eval_flatten(arg_forms)),
                 "contains"      => Some(self.eval_contains(arg_forms)),
-                "=*"            => Some(self.eval_contains(arg_forms)),
+                "*="            => Some(self.eval_contains(arg_forms)),
+                "index-of"      => Some(self.eval_index_of(arg_forms)),
+                "#*="           => Some(self.eval_index_of(arg_forms)),
                 "fold"          => Some(self.eval_fold(arg_forms)),
                 "@."            => Some(self.eval_fold(arg_forms)),
                 "min"           => Some(self.eval_min(arg_forms)),
                 "<<"            => Some(self.eval_min(arg_forms)),
                 "max"           => Some(self.eval_max(arg_forms)),
                 ">>"            => Some(self.eval_max(arg_forms)),
+                "select-by"     => Some(self.eval_select_by(arg_forms)),
+                "*@."           => Some(self.eval_select_by(arg_forms)),
+                "sort"          => Some(self.eval_sort(arg_forms)),
+                "<*"            => Some(self.eval_sort(arg_forms)),
+                "sort-by"       => Some(self.eval_sort_by(arg_forms)),
+                "<@"            => Some(self.eval_sort_by(arg_forms)),
+                "permute"       => Some(self.eval_permute(arg_forms)),
+                ".~."           => Some(self.eval_permute(arg_forms)),
                 "format"        => Some(self.eval_format(arg_forms)),
                 "$"             => Some(self.eval_format(arg_forms)),
                 "print"         => Some(self.eval_print(arg_forms)),
@@ -2675,6 +3706,10 @@ impl<'a> QEnv<'a> {
                 "$_"            => Some(self.eval_println(arg_forms)),
                 "halt"          => Some(self.eval_halt(arg_forms)),
                 "!!"            => Some(self.eval_halt(arg_forms)),
+                "istype"        => Some(self.eval_istype(arg_forms)),
+                "~?"            => Some(self.eval_istype(arg_forms)),
+                "type"          => Some(self.eval_type(arg_forms)),
+                "?~"            => Some(self.eval_type(arg_forms)),
                 _ => None,
             },
             _ => None,
