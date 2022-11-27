@@ -27,6 +27,11 @@ impl QErr {
         let QErr::Reason(reason) = self;
         return QErr::Reason(format!("{}: {}", source, reason));
     }
+
+    pub fn message(&self) -> &String {
+        let QErr::Reason(msg) = self;
+        msg
+    }
 }
 
 #[macro_export]
@@ -2224,50 +2229,6 @@ pub fn parse_atom(token: &str) -> QResult<QExp> {
         Ok(qsymbol!(token.to_string()))
     };
 }
-
-// pub fn parse(tokens: &[String]) -> QResult<(QExp, &[String])> {
-//     let (token, rest)
-//         = tokens.split_first()
-//         .ok_or(qerr!("missing closing ')'"))?;
-//     return match &token[..] {
-//         "(" => read_seq(rest),
-//         ")" => Err(qerr!("unexpected ')'")),
-//         _ => Ok((parse_atom(token), rest)),
-//     };
-// }
-//
-// pub fn read_seq(tokens: &[String]) -> QResult<(QExp, &[String])> {
-//     let mut res: Vec<QExp> = Vec::new();
-//     let mut xs = tokens;
-//     loop {
-//         let (next_token, rest)
-//             = xs.split_first()
-//             .ok_or(qerr!("missing closing ')'"))?;
-//         if next_token == ")" {
-//             // println!("{:?} | {:?}", res, rest);
-//             return Ok((QExp::List(res), rest));
-//         }
-//         let (exp, new_xs) = parse(xs)?;
-//         res.push(exp);
-//         xs = new_xs;
-//     }
-// }
-//
-// pub fn parse_atom(token: &str) -> QExp {
-//     return if let Ok(b) = bool::from_str(token) {
-//         qbool!(b)
-//     } else if let Ok(i) = i64::from_str(token) {
-//         qint!(i)
-//     } else if let Ok(f) = f64::from_str(token) {
-//         qfloat!(f)
-//     } else if let Ok(c) = C64::from_str(token) {
-//         qcomplex!(c)
-//     } else if token.starts_with('"') && token.ends_with('"') {
-//         qstr!(token.to_string())
-//     } else {
-//         qsymbol!(token.to_string())
-//     };
-// }
 
 #[derive(Clone)]
 pub struct QEnv<'a> {
