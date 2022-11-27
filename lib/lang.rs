@@ -2088,67 +2088,186 @@ pub fn convert_numbers_sametype(args: &[QExp])
         .map(|v| (v, exp_type));
 }
 
-// pub fn parse_exprs(input: String) -> QResult<Vec<QExp>> {
-//     let mut list_level: usize = 0;
-//     let mut in_str: bool = false;
-//     let mut in_comment: bool = false;
-//     let mut exprs: Vec<QExp> = Vec::new();
-//     let mut list: Vec<QExp> = Vec::new();
-//     let mut term: String = String::new();
-//     for x in input.chars() {
-//
-//
+// pub fn tokenize(expr: String) -> Vec<String> {
+//     return expr
+//         .replace('(', " ( ")
+//         .replace(')', " ) ")
+//         .split_whitespace()
+//         .map(|x| x.to_string())
+//         .collect();
+// }
 
-pub fn tokenize(expr: String) -> Vec<String> {
-    return expr
-        .replace('(', " ( ")
-        .replace(')', " ) ")
-        .split_whitespace()
-        .map(|x| x.to_string())
-        .collect();
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum TokenState {
+    Normal = 0,
+    InComment = 1,
+    InString = 2,
 }
 
-pub fn parse(tokens: &[String]) -> QResult<(QExp, &[String])> {
+pub fn tokenize(input: String) -> QResult<Vec<String>> {
+    let mut state = TokenState::Normal;
+    let mut ret: Vec<String> = Vec::new();
+    let mut term: String = String::new();
+    for x in input.chars() {
+        match state {
+            TokenState::Normal => match x {
+                ';' => {
+                    if !term.is_empty() {
+                        ret.push(mem::replace(&mut term, String::new()));
+                    }
+                    state = TokenState::InComment;
+                },
+                '"' => {
+                    if !term.is_empty() {
+                        return Err(qerr!("illegal insertion of '\"'"));
+                    }
+                    term.push(x);
+                    state = TokenState::InString;
+                },
+                '(' | ')' => {
+                    if !term.is_empty() {
+                        ret.push(mem::replace(&mut term, String::new()));
+                    }
+                    ret.push(x.to_string());
+                },
+                ' ' => {
+                    if !term.is_empty() {
+                        ret.push(mem::replace(&mut term, String::new()));
+                    }
+                },
+                '\n' => {
+                    if !term.is_empty() {
+                        ret.push(mem::replace(&mut term, String::new()));
+                    }
+                },
+                _ => {
+                    term.push(x);
+                }
+            },
+            TokenState::InComment => match x {
+                '\n' => { state = TokenState::Normal; },
+                _ => { continue; },
+            },
+            TokenState::InString => match x {
+                '"' => {
+                    term.push(x);
+                    ret.push(mem::replace(&mut term, String::new()));
+                    state = TokenState::Normal;
+                },
+                _ => {
+                    term.push(x);
+                },
+            },
+        }
+    }
+    if !term.is_empty() {
+        ret.push(mem::replace(&mut term, String::new()));
+    }
+    return Ok(ret);
+}
+
+pub fn parse(tokens: &[String]) -> QResult<Vec<QExp>> {
+    let mut exps: Vec<QExp> = Vec::new();
+    let mut rest: &[String] = tokens;
+    loop {
+        let (exp, rest_new): (QExp, &[String]) = parse_single(rest)?;
+        exps.push(exp);
+        rest = rest_new;
+        if rest.is_empty() { break; }
+    }
+    return Ok(exps);
+}
+
+fn parse_single(tokens: &[String]) -> QResult<(QExp, &[String])> {
     let (token, rest)
         = tokens.split_first()
         .ok_or(qerr!("missing closing ')'"))?;
     return match &token[..] {
-        "(" => read_seq(rest),
+        "(" => read_sequence(rest),
         ")" => Err(qerr!("unexpected ')'")),
-        _ => Ok((parse_atom(token), rest)),
+        _ => Ok((parse_atom(token)?, rest)),
     };
 }
 
-pub fn read_seq(tokens: &[String]) -> QResult<(QExp, &[String])> {
-    let mut res: Vec<QExp> = Vec::new();
+fn read_sequence(tokens: &[String]) -> QResult<(QExp, &[String])> {
+    let mut ret: Vec<QExp> = Vec::new();
     let mut xs = tokens;
     loop {
         let (next_token, rest)
             = xs.split_first()
             .ok_or(qerr!("missing closing ')'"))?;
         if next_token == ")" {
-            // println!("{:?} | {:?}", res, rest);
-            return Ok((QExp::List(res), rest));
+            return Ok((qlist!(ret), rest));
         }
-        let (exp, new_xs) = parse(xs)?;
-        res.push(exp);
+        let (exp, new_xs) = parse_single(xs)?;
+        ret.push(exp);
         xs = new_xs;
     }
 }
 
-pub fn parse_atom(token: &str) -> QExp {
+pub fn parse_atom(token: &str) -> QResult<QExp> {
     return if let Ok(b) = bool::from_str(token) {
-        qbool!(b)
+        Ok(qbool!(b))
     } else if let Ok(i) = i64::from_str(token) {
-        qint!(i)
+        Ok(qint!(i))
     } else if let Ok(f) = f64::from_str(token) {
-        qfloat!(f)
+        Ok(qfloat!(f))
     } else if let Ok(c) = C64::from_str(token) {
-        qcomplex!(c)
+        Ok(qcomplex!(c))
+    } else if token.starts_with('"') {
+        if token.ends_with('"') {
+            Ok(qstr!(token[1..token.len() - 1].to_string()))
+        } else {
+            Err(qerr!("missing closing '\"'"))
+        }
     } else {
-        QExp::Symbol(token.to_string())
+        Ok(qsymbol!(token.to_string()))
     };
 }
+
+// pub fn parse(tokens: &[String]) -> QResult<(QExp, &[String])> {
+//     let (token, rest)
+//         = tokens.split_first()
+//         .ok_or(qerr!("missing closing ')'"))?;
+//     return match &token[..] {
+//         "(" => read_seq(rest),
+//         ")" => Err(qerr!("unexpected ')'")),
+//         _ => Ok((parse_atom(token), rest)),
+//     };
+// }
+//
+// pub fn read_seq(tokens: &[String]) -> QResult<(QExp, &[String])> {
+//     let mut res: Vec<QExp> = Vec::new();
+//     let mut xs = tokens;
+//     loop {
+//         let (next_token, rest)
+//             = xs.split_first()
+//             .ok_or(qerr!("missing closing ')'"))?;
+//         if next_token == ")" {
+//             // println!("{:?} | {:?}", res, rest);
+//             return Ok((QExp::List(res), rest));
+//         }
+//         let (exp, new_xs) = parse(xs)?;
+//         res.push(exp);
+//         xs = new_xs;
+//     }
+// }
+//
+// pub fn parse_atom(token: &str) -> QExp {
+//     return if let Ok(b) = bool::from_str(token) {
+//         qbool!(b)
+//     } else if let Ok(i) = i64::from_str(token) {
+//         qint!(i)
+//     } else if let Ok(f) = f64::from_str(token) {
+//         qfloat!(f)
+//     } else if let Ok(c) = C64::from_str(token) {
+//         qcomplex!(c)
+//     } else if token.starts_with('"') && token.ends_with('"') {
+//         qstr!(token.to_string())
+//     } else {
+//         qsymbol!(token.to_string())
+//     };
+// }
 
 #[derive(Clone)]
 pub struct QEnv<'a> {
@@ -3716,9 +3835,9 @@ impl<'a> QEnv<'a> {
         };
     }
 
-    pub fn parse_eval(&mut self, expr: String) -> QResult<QExp> {
-        let (parsed_exp, _): (QExp, _) = parse(&tokenize(expr))?;
-        let evaled: QExp = self.eval(&parsed_exp)?;
+    pub fn parse_eval(&mut self, expr: String) -> QResult<Vec<QExp>> {
+        let exps: Vec<QExp> = parse(&tokenize(expr)?)?;
+        let evaled: Vec<QExp> = self.eval_forms(&exps)?;
         return Ok(evaled);
     }
 }

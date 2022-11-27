@@ -997,12 +997,14 @@ impl ReplOut {
 trait ReplEnv {
     fn repl_eval(&mut self, exp: &QExp) -> QResult<ReplOut>;
 
+    fn repl_eval_forms(&mut self, arg_forms: &[QExp]) -> QResult<Vec<ReplOut>>;
+
     fn repl_eval_help(&mut self, arg_forms: &[QExp]) -> QResult<QExp>;
 
     fn repl_eval_builtin(&mut self, exp: &QExp, arg_forms: &[QExp])
         -> Option<QResult<ReplOut>>;
 
-    fn repl_parse_eval(&mut self, expr: String) -> QResult<ReplOut>;
+    fn repl_parse_eval(&mut self, expr: String) -> QResult<Vec<ReplOut>>;
 }
 
 impl<'a> ReplEnv for QEnv<'a> {
@@ -1020,6 +1022,10 @@ impl<'a> ReplEnv for QEnv<'a> {
             },
             _ => self.eval(exp).map(|qexp| ReplOut::Print(qexp)),
         };
+    }
+
+    fn repl_eval_forms(&mut self, arg_forms: &[QExp]) -> QResult<Vec<ReplOut>> {
+        return arg_forms.iter().map(|x| self.repl_eval(x)).collect();
     }
 
     fn repl_eval_help(&mut self, arg_forms: &[QExp]) -> QResult<QExp> {
@@ -1303,9 +1309,9 @@ impl<'a> ReplEnv for QEnv<'a> {
         };
     }
 
-    fn repl_parse_eval(&mut self, expr: String) -> QResult<ReplOut> {
-        let (parsed_exp, _): (QExp, _) = parse(&tokenize(expr))?;
-        let evaled: ReplOut = self.repl_eval(&parsed_exp)?;
+    fn repl_parse_eval(&mut self, expr: String) -> QResult<Vec<ReplOut>> {
+        let exps: Vec<QExp> = parse(&tokenize(expr)?)?;
+        let evaled: Vec<ReplOut> = self.repl_eval_forms(&exps)?;
         return Ok(evaled);
     }
 }
@@ -1361,7 +1367,9 @@ pub fn run_repl() {
                     break;
                 }
                 match env.repl_parse_eval(expr) {
-                    Ok(res) => { res.unpack(); },
+                    Ok(res) => {
+                        res.into_iter().for_each(|r| { r.unpack(); });
+                    },
                     Err(e) => match e {
                         QErr::Reason(msg)
                             => { println_flush!("Error: {}", msg); },
