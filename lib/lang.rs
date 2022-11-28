@@ -80,7 +80,7 @@ const BUILTINS: &'static [&'static str] = &[
     "take",             "~.",   // done
     "take-while",       "~.@",  // done
     "last",             "-.",   // done
-    "skip", "           .~",    // done
+    "skip",             ".~",    // done
     "skip-while",       ".~@",  // done
     "split-at",         "|.",   // done
     "split-on",         "|@",   // done
@@ -116,7 +116,7 @@ const BUILTINS: &'static [&'static str] = &[
     "exp",              "e**",  
     "floor",            "~_",   
     "ceil",             "~^",   
-    "round",            "~.",   
+    "round",            "~:",   
     "padd",             "p+",   
     "log",                      
     "ln",                       
@@ -2093,20 +2093,12 @@ pub fn convert_numbers_sametype(args: &[QExp])
         .map(|v| (v, exp_type));
 }
 
-// pub fn tokenize(expr: String) -> Vec<String> {
-//     return expr
-//         .replace('(', " ( ")
-//         .replace(')', " ) ")
-//         .split_whitespace()
-//         .map(|x| x.to_string())
-//         .collect();
-// }
-
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum TokenState {
     Normal = 0,
     InComment = 1,
     InString = 2,
+    StringEscape = 3,
 }
 
 pub fn tokenize(input: String) -> QResult<Vec<String>> {
@@ -2159,9 +2151,24 @@ pub fn tokenize(input: String) -> QResult<Vec<String>> {
                     ret.push(mem::replace(&mut term, String::new()));
                     state = TokenState::Normal;
                 },
+                '\\' => {
+                    state = TokenState::StringEscape;
+                },
                 _ => {
                     term.push(x);
                 },
+            },
+            TokenState::StringEscape => {
+                match x {
+                    '"' => { term.push('"'); },
+                    '\\' => { term.push('\\'); },
+                    'n' => { term.push('\n'); },
+                    'r' => { term.push('\r'); },
+                    't' => { term.push('\t'); },
+                    '\n' => { term.push(' '); },
+                    _ => { term.push(x); },
+                }
+                state = TokenState::InString;
             },
         }
     }

@@ -10,18 +10,21 @@ yourself, run
 cargo run --release --bin q
 ```
 
+See [qlisp.vim][qlisp.vim] for basic syntax highlighting in Vim.
+
 ## To do
-- expand the list of built-in functions:
+- [x] expand the list of built-in functions:
     - basic stuff, like `print`, `format`, ...
     - iterator stuff, like `map`, `filter`, `fold`, `split`, ...
-- add a string type
-- add (nd)arrays
-- add hash maps
-- add various math/statistics functions
-- add a CLI and read executable expressions from files
-- *maybe* add looping
+- [x] add a string type
+- [ ] add (nd)arrays
+- [ ] add hash maps
+- [ ] add various math/statistics functions
+- [x] add a CLI and read executable expressions from files
+- ~~*maybe* add looping~~
 
 
 [risp]: https://stopa.io/post/222
 [quacs]: https://gitlab.com/whooie/quacs/-/tree/rustlib
+[qlisp.vim]: https://gitlab.com/whooie/qlisp.vim
 
