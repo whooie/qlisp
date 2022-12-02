@@ -4,10 +4,25 @@ A small toy lisp I wrote heavily following [this guide][risp].
 
 Planned for eventual integration with my [quantum computing project][quacs].
 
-To run the REPL (currently the only way to interact with the language) for
-yourself, run
+To build the interpreter/REPL for yourself, run
 ```bash
-cargo run --release --bin q
+cargo build --release --bin q
+```
+Built executables can then be used to interpret files, run standalone
+expressions, and launch the REPL.
+```
+$ q --help
+QLisp interpreter
+
+Usage: q [OPTIONS] [FILE]
+
+Arguments:
+  [FILE]  Run a file as a script. Overridden by `-c`
+
+Options:
+  -c, --command <COMMAND>  Program passed as a string
+  -h, --help               Print help information
+  -V, --version            Print version information
 ```
 
 See [qlisp.vim][qlisp.vim] for basic syntax highlighting in Vim.
