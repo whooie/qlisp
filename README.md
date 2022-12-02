@@ -1,6 +1,6 @@
 # QLisp (temp)
 
-A small toy lisp I wrote heavily following [this guide][risp].
+A small toy lisp, strongly inspired by [this guide][risp].
 
 Planned for eventual integration with my [quantum computing project][quacs].
 
