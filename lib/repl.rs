@@ -53,7 +53,7 @@ q>> b ; evaluates to 110
 "
 Assign multiple values to multiple symbols, recusively unpacking lists if
 necessary. The top-level value expression must be a list.
-Alias: `:=*`
+Alias: `*:=`
 
 Expected form:
 (let (<symbols>...) <value expression>)

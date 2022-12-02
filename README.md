@@ -30,6 +30,7 @@ See [qlisp.vim][qlisp.vim] for basic syntax highlighting in Vim.
 ## To do
 - [x] add a string type
 - [x] add a CLI and read executable expressions from files
+- [ ] add pattern-matching args to lambdas
 - [ ] add namespaces and importing definitions from other files
 - [ ] add (nd)arrays
 - [ ] add hash maps

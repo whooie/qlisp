@@ -856,7 +856,7 @@ pub fn fn_fold(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         = Indexable::from_qexp(env.eval(args.get(2).unwrap())?)
         .map_err(|_| qerr!("fold: third arg must be a list or str"))?;
     return match env.eval(args.get(1).unwrap())? {
-        qfunc!(f) => idxable.fold(&start, |args: &[QExp]| f(env, args)),
+        qfunc!(_, f) => idxable.fold(&start, |args: &[QExp]| f(env, args)),
         qlambda!(ll) => {
             let f = |args: &[QExp]| {
                 let mut ll_env: QEnv = ll.env(args, env)?;
@@ -901,7 +901,7 @@ pub fn fn_select_by(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
        = Indexable::from_qexp(env.eval(args.get(1).unwrap())?)
        .map_err(|_| qerr!("select-by: second arg must be a list or str"))?;
     return match env.eval(args.get(0).unwrap())? {
-        qfunc!(f) => {
+        qfunc!(_, f) => {
             idxable.select_by(|args: &[QExp]| f(env, args))
                 .map_err(|e| e.prepend_source("select-by"))
         },
@@ -1191,7 +1191,7 @@ pub fn fn_take_while(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
             qerr!("take-while: second arg must be a list or str")
         })?;
     return match env.eval(args.get(0).unwrap())? {
-        qfunc!(f) => {
+        qfunc!(_, f) => {
             idxable.take_while(|args: &[QExp]| f(env, args))
                 .map_err(|e| e.prepend_source("take-while"))
         },
@@ -1252,7 +1252,7 @@ pub fn fn_skip_while(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
             qerr!("skip-while: second arg must be a list or str")
         })?;
     return match env.eval(args.get(0).unwrap())? {
-        qfunc!(f) => {
+        qfunc!(_, f) => {
             idxable.skip_while(|args: &[QExp]| f(env, args))
                 .map_err(|e| e.prepend_source("skip-while"))
         },
@@ -1340,7 +1340,7 @@ pub fn fn_map(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         = Indexable::from_qexp(env.eval(args.get(1).unwrap())?)
         .map_err(|_| qerr!("map: second arg must be a list or str"))?;
     return match env.eval(args.get(0).unwrap())? {
-        qfunc!(f) => {
+        qfunc!(_, f) => {
             idxable.map(|args: &[QExp]| f(env, args))
                 .map_err(|e| e.prepend_source("map"))
         },
@@ -1365,7 +1365,7 @@ pub fn fn_filter(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         = Indexable::from_qexp(env.eval(args.get(1).unwrap())?)
         .map_err(|_| qerr!("filter: second arg must be a list or str"))?;
     return match env.eval(args.get(0).unwrap())? {
-        qfunc!(f) => {
+        qfunc!(_, f) => {
             idxable.filter(|args: &[QExp]| f(env, args))
                 .map_err(|e| e.prepend_source("filter"))
         },
@@ -1426,7 +1426,7 @@ pub fn fn_sort_by(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         = Indexable::from_qexp(env.eval(args.get(1).unwrap())?)
         .map_err(|_| qerr!("sort-by: second arg must be a list or str"))?;
     return match env.eval(args.get(0).unwrap())? {
-        qfunc!(f) => {
+        qfunc!(_, f) => {
             idxable.sort_by(|args: &[QExp]| f(env, args))
                 .map_err(|e| e.prepend_source("sort-by"))
         },
@@ -1518,7 +1518,7 @@ pub fn fn_split_on(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
             qerr!("split-on: second arg must eb a list or str")
     })?;
     return match env.eval(args.get(0).unwrap())? {
-        qfunc!(f) => {
+        qfunc!(_, f) => {
             idxable.split_on(|args: &[QExp]| f(env, args))
                 .map_err(|e| e.prepend_source("split-on"))
         },
@@ -1545,7 +1545,7 @@ pub fn fn_split_on_inc(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
             qerr!("split-on-inc: second arg must eb a list or str")
     })?;
     return match env.eval(args.get(0).unwrap())? {
-        qfunc!(f) => {
+        qfunc!(_, f) => {
             idxable.split_on_inc(|args: &[QExp]| f(env, args))
                 .map_err(|e| e.prepend_source("split-on-inc"))
         },
