@@ -13,16 +13,16 @@ cargo run --release --bin q
 See [qlisp.vim][qlisp.vim] for basic syntax highlighting in Vim.
 
 ## To do
-- [x] expand the list of built-in functions:
-    - basic stuff, like `print`, `format`, ...
-    - iterator stuff, like `map`, `filter`, `fold`, `split`, ...
 - [x] add a string type
+- [x] add a CLI and read executable expressions from files
+- [ ] add namespaces and importing definitions from other files
 - [ ] add (nd)arrays
 - [ ] add hash maps
 - [ ] add various math/statistics functions
-- [x] add a CLI and read executable expressions from files
-- ~~*maybe* add looping~~
+- [ ] add file I/O with hash map serialization to `json`, `toml`, `yaml`, ...
 
+## Known bugs
+- single-item lists have their contents evaluated twice, e.g. `((print "{}" 0))`
 
 [risp]: https://stopa.io/post/222
 [quacs]: https://gitlab.com/whooie/quacs/-/tree/rustlib
