@@ -6,7 +6,10 @@ use std::{
     rc::Rc,
     str::FromStr,
 };
-use num_complex::Complex64 as C64;
+use num_complex::{
+    Complex64 as C64,
+    ComplexFloat,
+};
 use num_traits::{
     One,
     Zero,
@@ -208,10 +211,37 @@ pub enum QExp {
     Str(String),
     Symbol(String),
     Func(String, fn(&mut QEnv, &[QExp]) -> Result<QExp, QErr>),
-    // Func(fn(&[QExp]) -> Result<QExp, QErr>),
     Lambda(QLambda),
     // Module(QEnv<'a>)
 }
+
+// #[derive(Clone)]
+// pub enum QExp {
+//     Number(QNum),
+//     Indexable(QIdxable),
+//     Symbol(String),
+//     Func(QFunc),
+// }
+//
+// #[derive(Clone)]
+// pub enum QNum {
+//     Bool(bool),
+//     Int(i64),
+//     Float(f64),
+//     Complex(C64),
+// }
+//
+// #[derive(Clone)]
+// pub enum QIdxable {
+//     List(Vec<QExp>),
+//     Str(String),
+// }
+//
+// #[derive(Clone)]
+// pub enum QFunc {
+//     Func(String, fn(&mut QEnv, &[QExp]) -> Result<QExp, QErr>),
+//     Lambda(QLambda),
+// }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum QExpType {
@@ -691,6 +721,307 @@ impl QExp {
     pub fn le(&self, rhs: &QExp) -> QResult<bool> { Ok(!self.gt(rhs)?) }
 
     pub fn ge(&self, rhs: &QExp) -> QResult<bool> { Ok(!self.lt(rhs)?) }
+
+    pub fn recip(&self) -> QResult<QExp> {
+        (!self.is_zero()).then(|| ())
+            .ok_or(qerr!("encountered zero in recip"))?;
+        return match self {
+            qbool!(b) => Ok(qfloat!((*b as u8 as f64).recip())),
+            qint!(i) => Ok(qfloat!((*i as f64).recip())),
+            qfloat!(f) => Ok(qfloat!(f.recip())),
+            qcomplex!(c) => Ok(qcomplex!(c.recip())),
+            _ => Err(qerr!("invalid type in recip")),
+        };
+    }
+
+    pub fn abs(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(b) => Ok(qbool!(*b)),
+            qint!(i) => Ok(qint!(i.abs())),
+            qfloat!(f) => Ok(qfloat!(f.abs())),
+            qcomplex!(c) => Ok(qfloat!(c.norm())),
+            _ => Err(qerr!("invalid type in abs")),
+        };
+    }
+
+    pub fn sqrt(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(b) => Ok(qfloat!(if *b { 1.0 } else { 0.0 })),
+            qint!(i) => Ok(qfloat!((*i as f64).sqrt())),
+            qfloat!(f) => Ok(qfloat!(f.sqrt())),
+            qcomplex!(c) => Ok(qcomplex!(c.sqrt())),
+            _ => Err(qerr!("invalid type in sqrt")),
+        };
+    }
+
+    pub fn cbrt(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(b) => Ok(qfloat!(if *b { 1.0 } else { 0.0 })),
+            qint!(i) => Ok(qfloat!((*i as f64).cbrt())),
+            qfloat!(f) => Ok(qfloat!(f.cbrt())),
+            qcomplex!(c) => Ok(qcomplex!(c.cbrt())),
+            _ => Err(qerr!("invalid type in cbrt")),
+        };
+    }
+
+    pub fn exp(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(b)
+                => Ok(qfloat!(if *b { std::f64::consts::E } else { 1.0 })),
+            qint!(i) => Ok(qfloat!((*i as f64).exp())),
+            qfloat!(f) => Ok(qfloat!(f.exp())),
+            qcomplex!(c) => Ok(qcomplex!(c.exp())),
+            _ => Err(qerr!("invalid type in exp")),
+        };
+    }
+
+    pub fn floor(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(b) => Ok(qint!(if *b { 1 } else { 0 })),
+            qint!(i) => Ok(qint!(*i)),
+            qfloat!(f) => Ok(qint!(f.floor() as i64)),
+            _ => Err(qerr!("invalid type in floor")),
+        };
+    }
+
+    pub fn ceil(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(b) => Ok(qint!(if *b { 1 } else { 0 })),
+            qint!(i) => Ok(qint!(*i)),
+            qfloat!(f) => Ok(qint!(f.ceil() as i64)),
+            _ => Err(qerr!("invalid type in ceil")),
+        };
+    }
+
+    pub fn round(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(b) => Ok(qint!(if *b { 1 } else { 0 })),
+            qint!(i) => Ok(qint!(*i)),
+            qfloat!(f) => Ok(qint!(f.round() as i64)),
+            _ => Err(qerr!("invalid type in round")),
+        };
+    }
+
+    pub fn ln(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(b) => Ok(qfloat!(if *b { 0.0 } else { f64::NEG_INFINITY })),
+            qint!(i) => Ok(qfloat!((*i as f64).ln())),
+            qfloat!(f) => Ok(qfloat!(f.ln())),
+            qcomplex!(c) => Ok(qcomplex!(c.ln())),
+            _ => Err(qerr!("invalid type in ln")),
+        };
+    }
+
+    pub fn sin(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(b) => Ok(qfloat!(if *b { 1.0_f64.sin() } else { 0.0 })),
+            qint!(i) => Ok(qfloat!((*i as f64).sin())),
+            qfloat!(f) => Ok(qfloat!(f.sin())),
+            qcomplex!(c) => Ok(qcomplex!(c.sin())),
+            _ => Err(qerr!("invalid type in sin")),
+        };
+    }
+
+    pub fn cos(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(b) => Ok(qfloat!(if *b { 1.0_f64.cos() } else { 1.0 })),
+            qint!(i) => Ok(qfloat!((*i as f64).cos())),
+            qfloat!(f) => Ok(qfloat!(f.cos())),
+            qcomplex!(c) => Ok(qcomplex!(c.cos())),
+            _ => Err(qerr!("invalid type in cos")),
+        };
+    }
+
+    pub fn tan(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(b) => Ok(qfloat!(if *b { 1.0_f64.tan() } else { 0.0 })),
+            qint!(i) => Ok(qfloat!((*i as f64).tan())),
+            qfloat!(f) => Ok(qfloat!(f.tan())),
+            qcomplex!(c) => Ok(qcomplex!(c.tan())),
+            _ => Err(qerr!("invalid type in tan")),
+        };
+    }
+
+    pub fn asin(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(b) => Ok(qfloat!(
+                if *b { std::f64::consts::FRAC_PI_2 } else { 0.0 }
+            )),
+            qint!(i) => Ok(qfloat!((*i as f64).asin())),
+            qfloat!(f) => Ok(qfloat!(f.asin())),
+            qcomplex!(c) => Ok(qcomplex!(c.asin())),
+            _ => Err(qerr!("invalid type in asin")),
+        };
+    }
+
+    pub fn acos(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(b) => Ok(qfloat!(
+                if *b { 0.0 } else { std::f64::consts::FRAC_PI_2 }
+            )),
+            qint!(i) => Ok(qfloat!((*i as f64).acos())),
+            qfloat!(f) => Ok(qfloat!(f.acos())),
+            qcomplex!(c) => Ok(qcomplex!(c.acos())),
+            _ => Err(qerr!("invalid type in acos")),
+        };
+    }
+
+    pub fn atan(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(b) => Ok(qfloat!(if *b { 1.0_f64.atan() } else { 0.0 })),
+            qint!(i) => Ok(qfloat!((*i as f64).atan())),
+            qfloat!(f) => Ok(qfloat!(f.atan())),
+            qcomplex!(c) => Ok(qcomplex!(c.atan())),
+            _ => Err(qerr!("invalid type in atan")),
+        };
+    }
+
+    pub fn atan2(&self) -> QResult<QExp> {
+        return match self {
+            qlist!(l) => {
+                if l.len() == 2 {
+                    match (
+                        convert_type_num(&l[0], qfloat!()),
+                        convert_type_num(&l[1], qfloat!()),
+                    ) {
+                        (Ok(qfloat!(y)), Ok(qfloat!(x)))
+                            => Ok(qfloat!(y.atan2(x))),
+                        _ => Err(qerr!("invalid type in atan2")),
+                    }
+                } else {
+                    Err(qerr!("atan2: args must be 2-item lists"))
+                }
+            },
+            _ => Err(qerr!("invalid type in atan2")),
+        };
+    }
+
+    pub fn sinh(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(b) => Ok(qfloat!(if *b { 1.0_f64.sinh() } else { 0.0 })),
+            qint!(i) => Ok(qfloat!((*i as f64).sinh())),
+            qfloat!(f) => Ok(qfloat!(f.sinh())),
+            qcomplex!(c) => Ok(qcomplex!(c.sinh())),
+            _ => Err(qerr!("invalid type in sinh")),
+        }
+    }
+
+    pub fn cosh(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(b) => Ok(qfloat!(if *b { 1.0_f64.cosh() } else { 1.0 })),
+            qint!(i) => Ok(qfloat!((*i as f64).cosh())),
+            qfloat!(f) => Ok(qfloat!(f.cosh())),
+            qcomplex!(c) => Ok(qcomplex!(c.cosh())),
+            _ => Err(qerr!("invalid type in cosh")),
+        };
+    }
+
+    pub fn tanh(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(b) => Ok(qfloat!(if *b { 1.0_f64.tanh() } else { 0.0 })),
+            qint!(i) => Ok(qfloat!((*i as f64).tanh())),
+            qfloat!(f) => Ok(qfloat!(f.tanh())),
+            qcomplex!(c) => Ok(qcomplex!(c.tanh())),
+            _ => Err(qerr!("invalid type in tanh")),
+        }
+    }
+
+    pub fn asinh(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(b) => Ok(qfloat!(if *b { 1.0_f64.asinh() } else { 0.0 })),
+            qint!(i) => Ok(qfloat!((*i as f64).asinh())),
+            qfloat!(f) => Ok(qfloat!(f.asinh())),
+            qcomplex!(c) => Ok(qcomplex!(c.asinh())),
+            _ => Err(qerr!("invalid type in asinh")),
+        };
+    }
+
+    pub fn acosh(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(b) => Ok(qfloat!(if *b { 0.0 } else { f64::NAN })),
+            qint!(i) => Ok(qfloat!((*i as f64).acosh())),
+            qfloat!(f) => Ok(qfloat!(f.acosh())),
+            qcomplex!(c) => Ok(qcomplex!(c.acosh())),
+            _ => Err(qerr!("invalid type in acosh")),
+        };
+    }
+
+    pub fn atanh(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(b) => Ok(qfloat!(if *b { f64::INFINITY } else { 0.0 })),
+            qint!(i) => Ok(qfloat!((*i as f64).atanh())),
+            qfloat!(f) => Ok(qfloat!(f.atanh())),
+            qcomplex!(c) => Ok(qcomplex!(c.atanh())),
+            _ => Err(qerr!("invalid type in atanh")),
+        };
+    }
+
+    pub fn arg(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(_) => Ok(qfloat!(0.0)),
+            qint!(i) => Ok(qfloat!(
+                if *i > 0 {
+                    0.0
+                } else if *i < 0 {
+                    std::f64::consts::PI
+                } else {
+                    f64::NAN
+                }
+            )),
+            qfloat!(f) => Ok(qfloat!(
+                if *f > 0.0 {
+                    0.0
+                } else if *f < 0.0 {
+                    std::f64::consts::PI
+                } else {
+                    f64::NAN
+                }
+            )),
+            qcomplex!(c) => Ok(qfloat!(c.arg())),
+            _ => Err(qerr!("invalid type in arg")),
+        };
+    }
+
+    pub fn cis(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(b) => Ok(qcomplex!(
+                if *b { C64::cis(1.0) } else { C64::cis(0.0) }
+            )),
+            qint!(i) => Ok(qcomplex!(C64::cis(*i as f64))),
+            qfloat!(f) => Ok(qcomplex!(C64::cis(*f))),
+            _ => Err(qerr!("invalid type in cis")),
+        };
+    }
+
+    pub fn conj(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(b) => Ok(qbool!(*b)),
+            qint!(i) => Ok(qint!(*i)),
+            qfloat!(f) => Ok(qfloat!(*f)),
+            qcomplex!(c) => Ok(qcomplex!(c.conj())),
+            _ => Err(qerr!("invalid type in conj")),
+        };
+    }
+
+    pub fn real(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(b) => Ok(qfloat!(if *b { 1.0 } else { 0.0 })),
+            qint!(i) => Ok(qfloat!(*i as f64)),
+            qfloat!(f) => Ok(qfloat!(*f)),
+            qcomplex!(c) => Ok(qfloat!(c.re)),
+            _ => Err(qerr!("invalid type in real")),
+        };
+    }
+
+    pub fn imag(&self) -> QResult<QExp> {
+        return match self {
+            qbool!(_) => Ok(qfloat!(0.0)),
+            qint!(_) => Ok(qfloat!(0.0)),
+            qfloat!(_) => Ok(qfloat!(0.0)),
+            qcomplex!(c) => Ok(qfloat!(c.im)),
+            _ => Err(qerr!("invalid type in imag")),
+        };
+    }
 }
 
 impl PartialEq for QExp {
@@ -743,7 +1074,7 @@ impl fmt::Display for QExp {
             },
             qstr!(x) => x.fmt(f),
             qsymbol!(x) => write!(f, "{}", x),
-            qfunc!(name, _) => write!(f, "func {} {{ ... }}", name),
+            qfunc!(name, _) => write!(f, "func <{}> {{ ... }}", name),
             qlambda!(x)
                 => write!(f, "lambda {} {{ ... }}", x.params_exp.as_ref()),
         };
@@ -2274,6 +2605,17 @@ pub struct QEnv<'a> {
     outer: Option<&'a QEnv<'a>>,
 }
 
+// #[derive(Clone)]
+// pub struct QEnv<'a> {
+//     data: HashMap<String, QEnvEntry<'a>>,
+//     outer: Option<&'a QEnv<'a>>,
+// }
+//
+// pub enum QEnvEntry<'a> {
+//     Exp(QExp),
+//     Mod(QEnv<'a>),
+// }
+
 macro_rules! add_fn(
     ( $env:ident, $name:literal, $alias:literal, $fn:ident ) => {
         $env.insert($name.to_string(),  QExp::Func($name.to_string(), $fn));
@@ -2295,148 +2637,148 @@ impl<'a> Default for QEnv<'a> {
     fn default() -> QEnv<'a> {
         let mut env: HashMap<String, QExp> = HashMap::new();
             // special -- keyword-like
-            add_fn!(env, "def",             ":=",   fns::fn_def);
-            add_fn!(env, "let",             "*:=",  fns::fn_let);
-            add_fn!(env, "fn",              "@:",   fns::fn_fn);
-            add_fn!(env, "defn",            "@:=",  fns::fn_defn);
-            add_fn!(env, "if",              "=>",   fns::fn_if);
+            add_fn!(env, "def",             ":=",   fns::fn_def           );
+            add_fn!(env, "let",             "*:=",  fns::fn_let           );
+            add_fn!(env, "fn",              "@:",   fns::fn_fn            );
+            add_fn!(env, "defn",            "@:=",  fns::fn_defn          );
+            add_fn!(env, "if",              "=>",   fns::fn_if            );
             // systems
-            add_fn!(env, "format",          "$",    fns::fn_format);
-            add_fn!(env, "print",           "$-",   fns::fn_print);
-            add_fn!(env, "println",         "$_",   fns::fn_println);
-            add_fn!(env, "halt",            "!!",   fns::fn_halt);
-            add_fn!(env, "istype",          "~?",   fns::fn_istype);
-            add_fn!(env, "type",            "?~",   fns::fn_type);
+            add_fn!(env, "format",          "$",    fns::fn_format        );
+            add_fn!(env, "print",           "$-",   fns::fn_print         );
+            add_fn!(env, "println",         "$_",   fns::fn_println       );
+            add_fn!(env, "halt",            "!!",   fns::fn_halt          );
+            add_fn!(env, "istype",          "~?",   fns::fn_istype        );
+            add_fn!(env, "type",            "?~",   fns::fn_type          );
             // type-casting
-            add_fn!(env, "bool",                    fns::fn_bool);
-            add_fn!(env, "int",                     fns::fn_int);
-            add_fn!(env, "float",                   fns::fn_float);
-            add_fn!(env, "complex",                 fns::fn_complex);
-            add_fn!(env, "list",                    fns::fn_list);
-            add_fn!(env, "str",                     fns::fn_str);
+            add_fn!(env, "bool",                    fns::fn_bool          );
+            add_fn!(env, "int",                     fns::fn_int           );
+            add_fn!(env, "float",                   fns::fn_float         );
+            add_fn!(env, "complex",                 fns::fn_complex       );
+            add_fn!(env, "list",                    fns::fn_list          );
+            add_fn!(env, "str",                     fns::fn_str           );
             // arithmetic
-            add_fn!(env, "add",             "+",    fns::fn_add);
-            add_fn!(env, "sub",             "-",    fns::fn_sub);
-            add_fn!(env, "mul",             "*",    fns::fn_mul);
-            add_fn!(env, "div",             "/",    fns::fn_div);
-            add_fn!(env, "idiv",            "//",   fns::fn_idiv);
+            add_fn!(env, "add",             "+",    fns::fn_add           );
+            add_fn!(env, "sub",             "-",    fns::fn_sub           );
+            add_fn!(env, "mul",             "*",    fns::fn_mul           );
+            add_fn!(env, "div",             "/",    fns::fn_div           );
+            add_fn!(env, "idiv",            "//",   fns::fn_idiv          );
             // boolean comparisons
-            add_fn!(env, "and",             "&&",   fns::fn_and);
-            add_fn!(env, "or",              "||",   fns::fn_or);
-            add_fn!(env, "xor",             "^",    fns::fn_xor);
-            add_fn!(env, "eq",              "=",    fns::fn_eq);
-            add_fn!(env, "neq",             "!=",   fns::fn_neq);
-            add_fn!(env, "gt",              ">",    fns::fn_gt);
-            add_fn!(env, "geq",             ">=",   fns::fn_geq);
-            add_fn!(env, "lt",              "<",    fns::fn_lt);
-            add_fn!(env, "leq",             "<=",   fns::fn_leq);
+            add_fn!(env, "and",             "&&",   fns::fn_and           );
+            add_fn!(env, "or",              "||",   fns::fn_or            );
+            add_fn!(env, "xor",             "^",    fns::fn_xor           );
+            add_fn!(env, "eq",              "=",    fns::fn_eq            );
+            add_fn!(env, "neq",             "!=",   fns::fn_neq           );
+            add_fn!(env, "gt",              ">",    fns::fn_gt            );
+            add_fn!(env, "geq",             ">=",   fns::fn_geq           );
+            add_fn!(env, "lt",              "<",    fns::fn_lt            );
+            add_fn!(env, "leq",             "<=",   fns::fn_leq           );
             // boolean accumulators
-            add_fn!(env, "all",             "&&*",  fns::fn_all);
-            add_fn!(env, "any",             "||*",  fns::fn_any);
-            add_fn!(env, "xany",            "^*",   fns::fn_xany);
+            add_fn!(env, "all",             "&&*",  fns::fn_all           );
+            add_fn!(env, "any",             "||*",  fns::fn_any           );
+            add_fn!(env, "xany",            "^*",   fns::fn_xany          );
             // iterable creation
-            add_fn!(env, "range",           "..",   fns::fn_range);
-            add_fn!(env, "range-inc",       "..=",  fns::fn_range_inc);
-            add_fn!(env, "repeat",          "#=",   fns::fn_repeat);
+            add_fn!(env, "range",           "..",   fns::fn_range         );
+            add_fn!(env, "range-inc",       "..=",  fns::fn_range_inc     );
+            add_fn!(env, "repeat",          "#=",   fns::fn_repeat        );
             // iterable accumulation
-            add_fn!(env, "length",          "#",    fns::fn_length);
-            add_fn!(env, "fold",            "@.",   fns::fn_fold);
-            add_fn!(env, "min",             "<<",   fns::fn_min);
-            add_fn!(env, "max",             ">>",   fns::fn_max);
-            add_fn!(env, "select-by",       "*@.",  fns::fn_select_by);
+            add_fn!(env, "length",          "#",    fns::fn_length        );
+            add_fn!(env, "fold",            "@.",   fns::fn_fold          );
+            add_fn!(env, "min",             "<<",   fns::fn_min           );
+            add_fn!(env, "max",             ">>",   fns::fn_max           );
+            add_fn!(env, "select-by",       "*@.",  fns::fn_select_by     );
             // iterable slicing and access
-            add_fn!(env, "get",             ".",    fns::fn_get);
-            add_fn!(env, "set",             ".:=",  fns::fn_set);
-            add_fn!(env, "slice",           "--",   fns::fn_slice);
-            add_fn!(env, "slice-inc",       "--=",  fns::fn_slice_inc);
-            add_fn!(env, "slice-by",        "~~",   fns::fn_slice_by);
-            add_fn!(env, "slice-inc-by",    "~~=",  fns::fn_slice_inc_by);
-            add_fn!(env, "pick",            ".*",   fns::fn_pick);
-            add_fn!(env, "first",           ".-",   fns::fn_first);
-            add_fn!(env, "take",            "~.",   fns::fn_take);
-            add_fn!(env, "take-while",      "~.@",  fns::fn_take_while);
-            add_fn!(env, "last",            "-.",   fns::fn_last);
-            add_fn!(env, "skip",            ".~",   fns::fn_skip);
-            add_fn!(env, "skip-while",      ".~@",  fns::fn_skip_while);
+            add_fn!(env, "get",             ".",    fns::fn_get           );
+            add_fn!(env, "set",             ".:=",  fns::fn_set           );
+            add_fn!(env, "slice",           "--",   fns::fn_slice         );
+            add_fn!(env, "slice-inc",       "--=",  fns::fn_slice_inc     );
+            add_fn!(env, "slice-by",        "~~",   fns::fn_slice_by      );
+            add_fn!(env, "slice-inc-by",    "~~=",  fns::fn_slice_inc_by  );
+            add_fn!(env, "pick",            ".*",   fns::fn_pick          );
+            add_fn!(env, "first",           ".-",   fns::fn_first         );
+            add_fn!(env, "take",            "~.",   fns::fn_take          );
+            add_fn!(env, "take-while",      "~.@",  fns::fn_take_while    );
+            add_fn!(env, "last",            "-.",   fns::fn_last          );
+            add_fn!(env, "skip",            ".~",   fns::fn_skip          );
+            add_fn!(env, "skip-while",      ".~@",  fns::fn_skip_while    );
             // iterable transformation
-            add_fn!(env, "step-by",         "~",    fns::fn_step_by);
-            add_fn!(env, "enumerate",       "##",   fns::fn_enumerate);
-            add_fn!(env, "reverse",         "<>",   fns::fn_reverse);
-            add_fn!(env, "cycle",           "<#>",  fns::fn_cycle);
-            add_fn!(env, "map",             "@",    fns::fn_map);
-            add_fn!(env, "filter",          "@!",   fns::fn_filter);
-            add_fn!(env, "unique",          "*!=",  fns::fn_unique);
-            add_fn!(env, "flatten",         "__",   fns::fn_flatten);
-            add_fn!(env, "sort",            "<*",   fns::fn_sort);
-            add_fn!(env, "sort-by",         "<@",   fns::fn_sort_by);
-            add_fn!(env, "permute",         ".~.",  fns::fn_permute);
+            add_fn!(env, "step-by",         "~",    fns::fn_step_by       );
+            add_fn!(env, "enumerate",       "##",   fns::fn_enumerate     );
+            add_fn!(env, "reverse",         "<>",   fns::fn_reverse       );
+            add_fn!(env, "cycle",           "<#>",  fns::fn_cycle         );
+            add_fn!(env, "map",             "@",    fns::fn_map           );
+            add_fn!(env, "filter",          "@!",   fns::fn_filter        );
+            add_fn!(env, "unique",          "*!=",  fns::fn_unique        );
+            add_fn!(env, "flatten",         "__",   fns::fn_flatten       );
+            add_fn!(env, "sort",            "<*",   fns::fn_sort          );
+            add_fn!(env, "sort-by",         "<@",   fns::fn_sort_by       );
+            add_fn!(env, "permute",         ".~.",  fns::fn_permute       );
             // iterable division
-            add_fn!(env, "split-at",        "|.",   fns::fn_split_at);
-            add_fn!(env, "split-on",        "|@",   fns::fn_split_on);
-            add_fn!(env, "split-on-inc",    "|@=",  fns::fn_split_on_inc);
+            add_fn!(env, "split-at",        "|.",   fns::fn_split_at      );
+            add_fn!(env, "split-on",        "|@",   fns::fn_split_on      );
+            add_fn!(env, "split-on-inc",    "|@=",  fns::fn_split_on_inc  );
             // iterable addition
-            add_fn!(env, "append",          "+.",   fns::fn_append);
-            add_fn!(env, "prepend",         ".+",   fns::fn_prepend);
-            add_fn!(env, "insert",          "+.+",  fns::fn_insert);
-            add_fn!(env, "join",            "++",   fns::fn_join);
-            add_fn!(env, "join-with",       "+*+",  fns::fn_join_with);
-            add_fn!(env, "zip",             "::",   fns::fn_zip);
-            add_fn!(env, "cart",            ":*:",  fns::fn_cart);
+            add_fn!(env, "append",          "+.",   fns::fn_append        );
+            add_fn!(env, "prepend",         ".+",   fns::fn_prepend       );
+            add_fn!(env, "insert",          "+.+",  fns::fn_insert        );
+            add_fn!(env, "join",            "++",   fns::fn_join          );
+            add_fn!(env, "join-with",       "+*+",  fns::fn_join_with     );
+            add_fn!(env, "zip",             "::",   fns::fn_zip           );
+            add_fn!(env, "cart",            ":*:",  fns::fn_cart          );
             // iterable testing
-            add_fn!(env, "contains",        "*=",   fns::fn_contains);
-            add_fn!(env, "index-of",        "#*=",  fns::fn_index_of);
+            add_fn!(env, "contains",        "*=",   fns::fn_contains      );
+            add_fn!(env, "index-of",        "#*=",  fns::fn_index_of      );
 
             // element-wise math
-            // add_fn!(env, "neg",             "!",    fns::fn_neg);
-            // add_fn!(env, "recip",           "1/",   fns::fn_recip);
-            // add_fn!(env, "abs",             "|.|",  fns::fn_abs);
-            // add_fn!(env, "sqrt",                    fns::fn_sqrt);
-            // add_fn!(env, "cbrt",                    fns::fn_cbrt);
-            // add_fn!(env, "exp",             "e**",  fns::fn_exp);
-            // add_fn!(env, "floor",           "~_",   fns::fn_floor);
-            // add_fn!(env, "ceil",            "~^",   fns::fn_ceil);
-            // add_fn!(env, "round",           "~:",   fns::fn_round);
-            // add_fn!(env, "ln",                      fns::fn_ln);
-            // add_fn!(env, "sin",                     fns::fn_sin);
-            // add_fn!(env, "cos",                     fns::fn_cos);
-            // add_fn!(env, "tan",                     fns::fn_tan);
-            // add_fn!(env, "asin",                    fns::fn_asin);
-            // add_fn!(env, "acos",                    fns::fn_acos);
-            // add_fn!(env, "atan",                    fns::fn_atan);
-            // add_fn!(env, "atan2",                   fns::fn_atan2);
-            // add_fn!(env, "sinh",                    fns::fn_sinh);
-            // add_fn!(env, "cosh",                    fns::fn_cosh);
-            // add_fn!(env, "tanh",                    fns::fn_tanh);
-            // add_fn!(env, "asinh",                   fns::fn_asinh);
-            // add_fn!(env, "acosh",                   fns::fn_acosh);
-            // add_fn!(env, "atanh",                   fns::fn_atanh);
-            // add_fn!(env, "arg",                     fns::fn_arg);
-            // add_fn!(env, "cis",             "e**i", fns::fn_cis);
-            // add_fn!(env, "conj",            "~_",   fns::fn_conj);
-            // add_fn!(env, "real",            "Re",   fns::fn_real);
-            // add_fn!(env, "imag",            "Im",   fns::fn_imag);
+            add_fn!(env, "neg",             "!",    fns::fn_neg           );
+            add_fn!(env, "recip",           "1/",   fns::fn_recip         );
+            add_fn!(env, "abs",             "|.|",  fns::fn_abs           );
+            add_fn!(env, "sqrt",                    fns::fn_sqrt          );
+            add_fn!(env, "cbrt",                    fns::fn_cbrt          );
+            add_fn!(env, "exp",             "e**",  fns::fn_exp           );
+            add_fn!(env, "floor",           "~_",   fns::fn_floor         );
+            add_fn!(env, "ceil",            "~^",   fns::fn_ceil          );
+            add_fn!(env, "round",           "~:",   fns::fn_round         );
+            add_fn!(env, "ln",                      fns::fn_ln            );
+            add_fn!(env, "sin",                     fns::fn_sin           );
+            add_fn!(env, "cos",                     fns::fn_cos           );
+            add_fn!(env, "tan",                     fns::fn_tan           );
+            add_fn!(env, "asin",                    fns::fn_asin          );
+            add_fn!(env, "acos",                    fns::fn_acos          );
+            add_fn!(env, "atan",                    fns::fn_atan          );
+            add_fn!(env, "atan2",                   fns::fn_atan2         );
+            add_fn!(env, "sinh",                    fns::fn_sinh          );
+            add_fn!(env, "cosh",                    fns::fn_cosh          );
+            add_fn!(env, "tanh",                    fns::fn_tanh          );
+            add_fn!(env, "asinh",                   fns::fn_asinh         );
+            add_fn!(env, "acosh",                   fns::fn_acosh         );
+            add_fn!(env, "atanh",                   fns::fn_atanh         );
+            add_fn!(env, "arg",                     fns::fn_arg           );
+            add_fn!(env, "cis",             "e**i", fns::fn_cis           );
+            add_fn!(env, "conj",            "~_",   fns::fn_conj          );
+            add_fn!(env, "real",            "Re",   fns::fn_real          );
+            add_fn!(env, "imag",            "Im",   fns::fn_imag          );
             // parameterized element-wise math
-            // add_fn!(env, "mod",             "%",    fns::fn_mod);
-            // add_fn!(env, "log",                     fns::fn_log);
-            // add_fn!(env, "pow",             "**",   fns::fn_pow);
+            add_fn!(env, "mod",             "%",    fns::fn_mod           );
+            // add_fn!(env, "log",                     fns::fn_log           );
+            // add_fn!(env, "pow",             "**",   fns::fn_pow           );
             // list -> list math
-            // add_fn!(env, "convolve",        "{*}",  fns::fn_convolve);
-            // add_fn!(env, "histogram",       "|#|",  fns::fn_histogram);
+            // add_fn!(env, "convolve",        "{*}",  fns::fn_convolve      );
+            // add_fn!(env, "histogram",       "|#|",  fns::fn_histogram     );
             // add_fn!(env, "histogram-prob",  "|p|",  fns::fn_histogram_prob);
-            // add_fn!(env, "fft",             "{F}",  fns::fn_fft);
-            // add_fn!(env, "ifft",            "{iF}", fns::fn_ifft);
-            // add_fn!(env, "findpeaks",       "^?",   fns::fn_findpeaks);
-            // add_fn!(env, "covariance",      "Cov",  fns::fn_covariance);
-            // add_fn!(env, "correlation",     "Corr", fns::fn_correlation);
+            // add_fn!(env, "fft",             "{F}",  fns::fn_fft           );
+            // add_fn!(env, "ifft",            "{iF}", fns::fn_ifft          );
+            // add_fn!(env, "findpeaks",       "^?",   fns::fn_findpeaks     );
+            // add_fn!(env, "covariance",      "Cov",  fns::fn_covariance    );
+            // add_fn!(env, "correlation",     "Corr", fns::fn_correlation   );
             // list -> value math
-            // add_fn!(env, "mean",            "{E}",  fns::fn_mean);
-            // add_fn!(env, "variance",        "Var",  fns::fn_variance);
-            // add_fn!(env, "stddev",          "Std",  fns::fn_stddev);
+            // add_fn!(env, "mean",            "{E}",  fns::fn_mean          );
+            // add_fn!(env, "variance",        "Var",  fns::fn_variance      );
+            // add_fn!(env, "stddev",          "Std",  fns::fn_stddev        );
             // list+1 -> value math
-            // add_fn!(env, "pnorm",           "|+|",  fns::fn_pnorm);
-            // add_fn!(env, "moment",          "{En}", fns::fn_moment);
+            // add_fn!(env, "pnorm",           "|+|",  fns::fn_pnorm         );
+            // add_fn!(env, "moment",          "{En}", fns::fn_moment        );
             // special-arg math
-            // add_fn!(env, "sample",          "?.",   fns::fn_sample);
+            // add_fn!(env, "sample",          "?.",   fns::fn_sample        );
         return QEnv { data: env, outer: None };
     }
 }
@@ -2496,17 +2838,19 @@ impl<'a> QEnv<'a> {
                 => Ok(exp.clone()),
             qlist!(list) => {
                 if let Some(first) = list.first() {
-                    match self.eval(first)? {
+                    let evalfirst: QExp = self.eval(first)?;
+                    match evalfirst {
                         qfunc!(_, f) => f(self, &list[1..]),
                         qlambda!(ll) => {
                             let argvals: Vec<QExp>
                                 = self.eval_multi(&list[1..])?;
                             ll.eval(self, &argvals)
                         },
-                        qsymbol!(s) => Err(
-                            qerr_fmt!("could not evaluate symbol {}", s)
-                        ),
-                        _ => Ok(qlist!(self.eval_multi(list)?)),
+                        _ => {
+                            let mut with_evalfirst: Vec<QExp> = vec![evalfirst];
+                            with_evalfirst.append(&mut list.iter().skip(1).cloned().collect());
+                            Ok(qlist!(self.eval_multi(&with_evalfirst)?))
+                        },
                     }
                 } else {
                     Ok(exp.clone())
@@ -2571,143 +2915,3 @@ impl FormatX for String {
     }
 }
 
-// impl<'a> MathBuiltins for QEnv<'a> {
-//     /*
-//      * element-wise math
-//      */
-//
-//     fn eval_neg(&mut self, args: &[QExp]) -> QResult<QExp> {
-//         fn fn_neg(args: &[QExp]) -> QResult<QExp> {
-//             if args.len() == 1 {
-//                 if let Some(qlist!(l)) = args.first() {
-//                     return fn_neg(l);
-//                 }
-//                 return args.get(0).unwrap().neg();
-//             } else {
-//                 let new: Vec<QExp>
-//                     = args.iter()
-//                     .map(|x| x.neg())
-//                     .collect::<QResult<Vec<QExp>>>()?;
-//                 return Ok(qlist!(new));
-//             }
-//         }
-//         return fn_neg(&self.eval_multi(args)?);
-//     }
-//
-//     // fn eval_recip(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_abs(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_sqrt(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_cbrt(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_exp(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_floor(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_ceil(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_round(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_ln(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_sin(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_cos(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_tan(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_asin(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_acos(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_atan(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_atan2(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_sinh(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_cosh(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_tanh(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_asinh(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_acosh(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_atanh(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_arg(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_cis(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_conj(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_real(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_imag(&mut self, args: &[QExp]) -> QResult<QExp>;
-//
-//     /*
-//      * parameterized element-wise math
-//      */
-//
-//     fn eval_mod(&mut self, args: &[QExp]) -> QResult<QExp> {
-//         if args.len() != 2 {
-//             return Err(qerr!("mod must have exactly two arguments"));
-//         }
-//         let mut M: QExp = self.eval(args.get(0).unwrap())?;
-//         let (nums, mut ty): (QExp, QExpType)
-//             = match self.eval(args.get(1).unwrap())? {
-//                 qbool!(b) => Ok((qbool!(b), qbool!())),
-//                 qint!(i) => Ok((qint!(i), qint!())),
-//                 qfloat!(f) => Ok((qfloat!(f), qfloat!())),
-//                 qlist!(l) => {
-//                     convert_numbers_sametype(&l)
-//                         .map(|(n, t)| (qlist!(n), t))
-//                         .map_err(|e| e.prepend_source("mod"))
-//                 },
-//                 _ => Err(qerr!(
-//                     "mod: second argument must be a number or a list of numbers"
-//                 )),
-//             }?;
-//         ty = cmp::max(M.exp_type(), ty);
-//         if ty > qfloat!() {
-//             return Err(qerr!(
-//                 "mod: cannot modulo with complex or non-numerical values"));
-//         }
-//         M = convert_type_num(&M, ty)
-//             .map_err(|e| e.prepend_source("mod"))?;
-//         return match &nums {
-//             qbool!(_) | qint!(_) | qfloat!(_) => {
-//                 convert_type_num(&nums, ty)?.modulo(&M)
-//                     .map_err(|e| e.prepend_source("mod"))
-//             },
-//             qlist!(l) => {
-//                 Ok(qlist!(
-//                     l.iter()
-//                     .map(|qk| convert_type_num(qk, ty))
-//                     .collect::<QResult<Vec<QExp>>>()
-//                     .map_err(|e| e.prepend_source("mod"))?
-//                     .iter()
-//                     .map(|qk| qk.modulo(&M))
-//                     .collect::<QResult<Vec<QExp>>>()
-//                     .map_err(|e| e.prepend_source("mod"))?
-//                 ))
-//             },
-//             _ => Err(qerr!("unexpected state")),
-//         };
-//     }
-//
-//     // fn eval_log(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_pow(&mut self, args: &[QExp]) -> QResult<QExp>;
-//
-//     /*
-//      * list -> list math
-//      */
-//
-//     // fn eval_convolve(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_histogram(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_histogram_prob(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_fft(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_ifft(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_findpeaks(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_covariance(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_correlation(&mut self, args: &[QExp]) -> QResult<QExp>;
-//
-//     /*
-//      * list -> value math
-//      */
-//
-//     // fn eval_mean(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_variance(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_stddev(&mut self, args: &[QExp]) -> QResult<QExp>;
-//
-//     /*
-//      * parameterized list -> value math
-//      */
-//
-//     // fn eval_pnorm(&mut self, args: &[QExp]) -> QResult<QExp>;
-//     // fn eval_moment(&mut self, args: &[QExp]) -> QResult<QExp>;
-//
-//     /*
-//      * special-arg math
-//      */
-//
-//     // fn eval_sample(&mut self, args: &[QExp]) -> QResult<QExp>;
-// }
-//
