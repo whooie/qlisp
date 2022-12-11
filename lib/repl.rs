@@ -117,6 +117,317 @@ q>> (if b 1 0) ; evaluates to 0
 ",
         ),
 
+/*
+ * systems
+ */
+
+        "format" => (
+            "Substitute values for patterns in a str.",
+"
+Substitute values for patterns in a format string.
+Alias: `$`
+
+Expected form:
+(format <format string> <values>...)
+
+Example:
+q>> (format \"hello, {}!\" \"John\") ; evaluates to \"hello, John!\"
+q>> (format \"{:.5}\" 3.141592653589793238) ; evaluates to \"3.14159\"
+",
+        ),
+
+        "print" => (
+            "Print a formatted str to STDOUT.",
+"
+Substitute values for patterns in a format string and print to STDOUT. If a
+single value is passed, the value is returned; if multiple values are passed,
+they are all returned in a list.
+Alias: `$-`
+
+Expected form:
+(print <format string> <values>...)
+
+Example:
+q>> (print \"hello {}!\" \"John\") ; prints `hello John!` and evaluates to \"John\"
+q>> ; passed values are returned, so `print` can be inserted in the middle of
+q>> ; other expressions
+q>> (+ (print \"{}\" (* 2 3)) 5) ; prints `6` and evaluates to 11
+",
+        ),
+
+        "println" => (
+            "Print a formatted str to STDOUT with a newline appended.",
+"
+Substitute values for patterns in a format string and print to STDOUT with
+newline appended. If a single value is passed, the value is returned; if
+multiple values are passed, they are all returned in a list.
+Alias: `$_`
+
+Expected form:
+(println <format string> <values>...)
+
+Example:
+q>> (println \"hello {}!\" \"John\") ; prints `hello John!\\n` and evaluates to \"John\"
+q>> ; passed values are returned, so `print` can be inserted in the middle of
+q>> ; other expressions
+q>> (+ (println \"{}\" (* 2 3)) 5) ; prints `6\\n` and evaluates to 11
+",
+        ),
+
+        "halt" => (
+            "Halt execution of a program with an error message.",
+"
+Substitute values for patterns in a format string and return the result as an
+error.
+Alias: `!!`
+
+Expected form:
+(halt <format string> <values>...)
+
+Example:
+q>> (defn a -1)
+q>> (if (> a 0) (* a 2) (halt \"expected a positive value, but got {}\" a))
+",
+        ),
+
+        "istype" => (
+            "Test the type of a value.",
+"
+Returns `true` if a value is of a given type or list of types, `false`
+otherwise. Types must be specified as strs. Available type names are: `bool`,
+`int`, `float`, `complex`, `list`, `str`, `function`, `any`.
+Alias: `~?`
+
+Expected form:
+(istype <type or list of types> <value>)
+
+Example:
+q>> (def z 5i)
+q>> (istype \"complex\" z) ; evaluates to true
+q>> (def reals (\"bool\" \"int\" \"float\"))
+q>> (if (istype reals z) 0 1) ; evaluates to 1
+",
+        ),
+
+        "type" => (
+            "Get the type(s) of one or more values.",
+"
+Get the type(s) of one or more values as strs. If one value is passed, the
+result is returned as a single string, otherwise a list of strings is returned.
+Possible return values are \"bool\", \"int\", \"float\", \"complex\", \"list\", \"str\",
+\"function\".
+Alias: `?~`
+
+Expected form:
+(type <values>...)
+
+Example:
+q>> (type true) ; evaluates to \"bool\"
+q>> (type true 1 1.0 1i) ; evaluates to (\"bool\" \"int\" \"float\" \"complex\")
+",
+        ),
+
+/*
+ * type-casting
+ */
+
+        "bool" => (
+            "Boolean type.",
+"
+Primitive Boolean type. Can be used as a function to cast other values to this
+type or parse strs as such. If a single list is passed, operates on the contents
+of the list instead of the list itself.
+
+Expected form:
+(bool <values>...)
+
+Example:
+q>> (bool 0 1.0 1i) ; evaluates to (false true true)
+q>> (bool \"false\") ; evaluates to false
+",
+        ),
+
+        "int" => (
+            "Integer type.",
+"
+Signed 64-bit integer type. Can be used as a function to cast other values to
+this type or parse strs as such. If a single list is passed, operates on the
+contents of the list instead of the list itself.
+
+Expected form:
+(int <values>...)
+
+Example:
+q>> (int true false 5.5) ; evaluates to (1 0 5)
+q>> (int \"8\") ; evaluates to 8
+"
+        ),
+
+        "float" => (
+            "Floating-point type.",
+"
+64-bit floating-point type. Can be used as a function to cast other values to
+this type or parse strs as such. If a single list is passed, operates on the
+contents of the list instead of the list itself.
+
+Expected form:
+(float <values>...)
+
+Example:
+q>> (float true 5) ; evaluates to (0.0 5.0)
+q>> (float \"3.14159\") ; evaluates to 3.14159
+"
+        ),
+
+        "complex" => (
+            "Complex floating-point type.",
+"
+128-bit complex floating-point type. Can be used as a function to cast other
+values to this type or parse strs as such. If a single list is passed, operates
+on the contents of the list instead of the list itself.
+
+Expected form:
+(complex <values>...)
+
+Example:
+q>> (complex true 5 5.0) ; evaluates to (1.0+0i 5.0+0i 5.0+0i)
+q>> (complex \"2+8i\") ; evaluates to 2.0+8.0i
+",
+        ),
+
+        "list" => (
+            "List type.",
+"
+List type. Can be used as a function to pack all arguments into a list.
+
+Expected form:
+(list <values>...)
+
+Example:
+q>> (list true 5 5.0 5i \"hello\") ; evaluates to (true 5 5.0 5i \"hello\")
+",
+        ),
+
+        "str" => (
+            "String type.",
+"
+String type. Can be used as a function to cast all arguments to strs using a
+default formatter.
+
+Expected form:
+(str <values>...)
+
+Example:
+q>> (str 5.0) ; evaluates to \"5\"
+q>> (str \"hello\" 1.0546 10i) ; evaluates to (\"hello\" \"1.0546\" \"0+10i\")
+"
+        ),
+
+/*
+ * arithmetic
+ */
+
+        "add" => (
+            "Addition operation.",
+"
+Addition operation. Supports any number of arguments, retuning the total sum. If
+no arguments are passed, returns 0. The type of the returned value is the most
+general of all argument types. If only a single list is passed, this function is
+applied to its contents.
+Alias: `+`
+
+Expected form:
+(add <numbers>...)
+
+Example:
+q>> (add 5 5 5) ; evaluates to 15
+q>> (add 5 5 5.0) ; evaluates to 15.0
+q>> (add 5 5.0 5.0+0i) ; evaluates to 15.0+0i
+",
+        ),
+
+        "sub" => (
+            "subtraction operation.",
+"
+Subtraction operation. Requires at least one argument, subtracting all following
+arguments from the first. The type of the returned value is the most general of
+all argument types. If only a single list is passed, this function is applied to
+its contents.
+Alias: `-`
+
+Expected form:
+(sub <numbers>...)
+
+Example:
+q>> (sub 5 5 5) ; evaluates to -10
+q>> (sub 5 5 5.0) ; evaluates to -10.0
+q>> (sub 5 5.0 5.0+0i) ; evaluates to -10.0+0i
+"
+        ),
+
+        "mul" => (
+            "Multiplication operation.",
+"
+Multiplication operation. Supports any number of arguments, returning the total
+product. If no arguments are passed, returns 1. The type of the returned value
+is the most general of all argument types. If only a single list is passed, this
+function is applied to its contents.
+Alias: `*`
+
+Expected form:
+(mul <numbers>...)
+
+Example:
+q>> (mul 5 5 5) ; evaluates to 125
+q>> (mul 5 5 5.0) ; evaluates to 125.0
+q>> (mul 5 5.0 5.0+0i) ; evaluates to 125.0+0i
+"
+        ),
+
+        "div" => (
+            "Division operation.",
+"
+Division operation. Requires at least one argument, dividing the first by all
+following arguments. The type of the returned value is either a float or a
+complex, depending on the types of the arguments. If only a single list is
+passed, this function is applied to its contents.
+Alias: `/`
+
+Expected form:
+(div <numbers>...)
+
+Example:
+q>> (div 5 5 5) ; evaluates to 0.2
+q>> (div 5 5 5.0) ; evaluates to 0.2
+q>> (div 5 5.0 5.0+0i) ; evaluates to 0.2+0i
+"
+        ),
+
+        "idiv" => (
+            "Integer division operation.",
+"
+Integer division operation, where a floor operator is applied after each
+pairwise operation. Requires at least one argument, integer-dividing the first
+by all following arguments. Does not accept complex-valued arguments. The type
+of the returned value is always an int. If only a single list is passed, this
+function is applied to its contents.
+Alias: `//`
+
+Expected form:
+(idiv <numbers>...)
+
+Example:
+q>> (idiv 5 2) ; evaluates to 2
+q>> (idiv -5 2.0) ; evaluates to -3
+q>> (idiv 5 2.0) ; evaluates to 2
+q>> (idiv 5 2.0 2.2) ; evaluates to 0
+"
+        ),
+
+/*
+ * boolean comparisons
+ */
+
         "and" => (
             "Logical AND operator.",
 "
@@ -169,217 +480,16 @@ q>> (xor) ; evaluates to false
 ",
         ),
 
-/*
- * type-casting
- */
-
-        "bool" => (
-            "Boolean type.",
-"
-Primitive Boolean type. Can be used as a function to cast other values to this
-type or parse strs as such. If a single list is provided, operates on the
-contents of the list instead of the list itself.
-
-Expected form:
-(bool <values>...)
-
-Example:
-q>> (bool 0 1.0 1i) ; evaluates to (false true true)
-q>> (bool \"false\") ; evaluates to false
-",
-        ),
-
-        "int" => (
-            "Integer type.",
-"
-Signed 64-bit integer type. Can be used as a function to cast other values to
-this type or parse strs as such. If a single list is provided, operates on the
-contents of the list instead of the list itself.
-
-Expected form:
-(int <values>...)
-
-Example:
-q>> (int true false 5.5) ; evaluates to (1 0 5)
-q>> (int \"8\") ; evaluates to 8
-"
-        ),
-
-        "float" => (
-            "Floating-point type.",
-"
-64-bit floating-point type. Can be used as a function to cast other values to
-this type or parse strs as such. If a single list is provided, operates on the
-contents of the list instead of the list itself.
-
-Expected form:
-(float <values>...)
-
-Example:
-q>> (float true 5) ; evaluates to (0.0 5.0)
-q>> (float \"3.14159\") ; evaluates to 3.14159
-"
-        ),
-
-        "complex" => (
-            "Complex floating-point type.",
-"
-128-bit complex floating-point type. Can be used as a function to cast other
-values to this type or parse strs as such. If a single list is provided,
-operates on the contents of the list instead of the list itself.
-
-Expected form:
-(complex <values>...)
-
-Example:
-q>> (complex true 5 5.0) ; evaluates to (1.0+0i 5.0+0i 5.0+0i)
-q>> (complex \"2+8i\") ; evaluates to 2.0+8.0i
-",
-        ),
-
-        "list" => (
-            "List type.",
-"
-List type. Can be used as a function to pack all arguments into a list.
-
-Expected form:
-(list <values>...)
-
-Example:
-q>> (list true 5 5.0 5i \"hello\") ; evaluates to (true 5 5.0 5i \"hello\")
-",
-        ),
-
-        "str" => (
-            "String type.",
-"
-String type. Can be used as a function to cast all arguments to strs using a
-default formatter.
-
-Expected form:
-(str <values>...)
-
-Example:
-q>> (str 5.0) ; evaluates to \"5\"
-q>> (str \"hello\" 1.0546 10i) ; evaluates to (\"hello\" \"1.0546\" \"0+10i\")
-"
-        ),
-
-/*
- * arithmetic
- */
-
-        "add" => (
-            "Addition operation.",
-"
-Addition operation. Supports any number of arguments, retuning the total sum. If
-no arguments are provided, returns 0. The type of the returned value is the
-most general of all argument types. If only a single list is provided, this
-function is applied to its contents.
-Alias: `+`
-
-Expected form:
-(add <numbers>...)
-
-Example:
-q>> (add 5 5 5) ; evaluates to 15
-q>> (add 5 5 5.0) ; evaluates to 15.0
-q>> (add 5 5.0 5.0+0i) ; evaluates to 15.0+0i
-",
-        ),
-
-        "sub" => (
-            "subtraction operation.",
-"
-Subtraction operation. Requires at least one argument, subtracting all following
-arguments from the first. The type of the returned value is the most general of
-all argument types. If only a single list is provided, this function is applied
-to its contents.
-Alias: `-`
-
-Expected form:
-(sub <numbers>...)
-
-Example:
-q>> (sub 5 5 5) ; evaluates to -10
-q>> (sub 5 5 5.0) ; evaluates to -10.0
-q>> (sub 5 5.0 5.0+0i) ; evaluates to -10.0+0i
-"
-        ),
-
-        "mul" => (
-            "Multiplication operation.",
-"
-Multiplication operation. Supports any number of arguments, returning the total
-product. If no arguments are provided, returns 1. The type of the returned value
-is the most general of all argument types. If only a single list is provided,
-this function is applied to its contents.
-Alias: `*`
-
-Expected form:
-(mul <numbers>...)
-
-Example:
-q>> (mul 5 5 5) ; evaluates to 125
-q>> (mul 5 5 5.0) ; evaluates to 125.0
-q>> (mul 5 5.0 5.0+0i) ; evaluates to 125.0+0i
-"
-        ),
-
-        "div" => (
-            "Division operation.",
-"
-Division operation. Requires at least one argument, dividing the first by all
-following arguments. The type of the returned value is either a float or a
-complex, depending on the types of the arguments. If only a single list is
-provided, this function is applied to its contents.
-Alias: `/`
-
-Expected form:
-(div <numbers>...)
-
-Example:
-q>> (div 5 5 5) ; evaluates to 0.2
-q>> (div 5 5 5.0) ; evaluates to 0.2
-q>> (div 5 5.0 5.0+0i) ; evaluates to 0.2+0i
-"
-        ),
-
-        "idiv" => (
-            "Integer division operation.",
-"
-Integer division operation, where a floor operator is applied after each
-pairwise operation. Requires at least one argument, integer-dividing the first
-by all following arguments. Does not accept complex-valued arguments. The type
-of the returned value is always an int. If only a single list is provided, this
-function is applied to its contents.
-Alias: `//`
-
-Expected form:
-(idiv <numbers>...)
-
-Example:
-q>> (idiv 5 2) ; evaluates to 2
-q>> (idiv -5 2.0) ; evaluates to -3
-q>> (idiv 5 2.0) ; evaluates to 2
-q>> (idiv 5 2.0 2.2) ; evaluates to 0
-"
-        ),
-
-/*
- * boolean comparisons
- */
-
         "eq" => (
             "Equality comparison operator.",
 "
 Equality comparison operator. Not to be confused with the `def`/`:=` assignment
 keyword. Returns `false` if there exists at least 1 argument that is not equal
-to the rest. Returns `true` if no arguments are provided. If only a single list
-is provided, operates on the contents of the list instead of the list itself.
-Note that two numbers of different types (e.g. 5 and 5.0) are *not* considered
-equal, even if their numerical values are the same. To perform such a
-comparison, cast the values to the same type, e.g. `(= (float 5 5.0))`.
+to the rest. Returns `true` if no arguments are passed. If only a single list is
+passed, operates on the contents of the list instead of the list itself. Note
+that two numbers of different types (e.g. 5 and 5.0) are *not* considered equal,
+even if their numerical values are the same. To perform such a comparison, cast
+the values to the same type, e.g. `(= (float 5 5.0))`.
 Alias: `=`
 
 Expected form:
@@ -397,11 +507,11 @@ q>> (eq (float a 5 5.0)) ; evaluates to true
             "Non-equality comparison operator.",
 "
 Non-equality comparison operator. Returns `false` if at least two arguments are
-equal. Returns `true` if no arguments are provided. If only a single list is
-provided, operates on the contents of the list instead of the list itself.
-Note that two numbers of different types (e.g. 5 and 5.0) are *not* considered
-equal, even if their numerical values are the same. To perform such a
-comparison, cast the values to the same type, e.g. `(!= (float 5 5.0))`.
+equal. Returns `true` if no arguments are passed. If only a single list is
+passed, operates on the contents of the list instead of the list itself. Note
+that two numbers of different types (e.g. 5 and 5.0) are *not* considered equal,
+even if their numerical values are the same. To perform such a comparison, cast
+the values to the same type, e.g. `(!= (float 5 5.0))`.
 Alias: `!=`
 
 Expected form:
@@ -420,8 +530,8 @@ q>> (neq (float a 5.0)) ; evaluates to false
 "
 Greater-than comparison operator. Returns `true` if the arguments are in
 monotonic, descending order, i.e. every element is greater than the one
-following it. Returns `true` if no arguments are provided. If only a single list
-is provided, operates on the contents of the list instead of the list itself.
+following it. Returns `true` if no arguments are passed. If only a single list
+is passed, operates on the contents of the list instead of the list itself.
 Alias: `>`
 
 Expected form:
@@ -436,11 +546,11 @@ q>> (gt \"c\" \"b\" \"a\") ; evaluates to true
 
         "geq" => (
             "Greater-than-or-equal-to comparison operator.",
-"Greater-than-or-equal-to comparison operator. Returns `true` if the arguments
+"
+Greater-than-or-equal-to comparison operator. Returns `true` if the arguments
 are in non-increasing order, i.e. there exists no element that is less than the
-one following it. Returns `true` if no arguments are provided. If only a single
-list is provided, operates on the contents of the list instead of the list
-itself.
+one following it. Returns `true` if no arguments are passed. If only a single
+list is passed, operates on the contents of the list instead of the list itself.
 Alias: `>=`
 
 Expected form:
@@ -458,8 +568,8 @@ q>> (geq \"c\" \"b\" \"a\") ; evaluates to true
 "
 Less-than comparison operator. Returns `true` if the arguments are in monotonic,
 ascending order, i.e. every element is less than the one following it. Returns
-`true` if no arguments are provided. If only a single list is provided, operates
-on the contents of the list instead of the list itself.
+`true` if no arguments are passed. If only a single list is passed, operates on
+the contents of the list instead of the list itself.
 Alias: `<`
 
 Expected form:
@@ -477,8 +587,8 @@ q>> (gt \"a\" \"b\" \"c\") ; evaluates to true
 "
 Less-than-or-equal-to comparison operator. Returns `true` if the arguments are
 in non-decreasing order, i.e. there exists no element that is greater than the
-one following it. Returns `true` if no arguments are provided. If only a single
-list is provided, operates on the contents of the list instead of the list
+one following it. Returns `true` if no arguments are passed. If only a single
+list is passed, operates on the contents of the list instead of the list
 itself.
 Alias: `<=`
 
@@ -1200,9 +1310,9 @@ q>> (insert 3 \"hello world\" \"abc\" \"def\") ; evaluates to \"helabcdeflo worl
         "join" => (
             "Concatenate lists or strs.",
 "
-Concatenate two or more lists or strs in the order they are provided. Arguments
-must be either all lists or all strs. If only a single list is provided,
-operates on the contents of the list instead of the list itself.
+Concatenate two or more lists or strs in the order they are passed. Arguments
+must be either all lists or all strs. If only a single list is passed, operates
+on the contents of the list instead of the list itself.
 Alias: `++`
 
 Expected form:
@@ -1217,10 +1327,10 @@ q>> (join \"hello\" \" \" \"world\") ; evaluates to \"hello world\"
         "join-with" => (
             "Concatenate lists or strs with an item placed at each join.",
 "
-Concatenate two or more lists or strs in the order they are provided, inserting
-an extra item at each join. Arguments after the item just be either all lists or
-all strs. If only a single list is provided, operates on the contents of the
-list instead of the list itself.
+Concatenate two or more lists or strs in the order they are passed, inserting an
+extra item at each join. Arguments after the item just be either all lists or
+all strs. If only a single list is passed, operates on the contents of the list
+instead of the list itself.
 Alias `+*+`
 
 Expected form:
@@ -1238,7 +1348,7 @@ q>> (join-with \" \" \"hello\" \"world\") ; evaluates to \"hello world\"
 Combine lists or strs element-wise, returning a list of lists containing
 elements drawn from each argument. The length of the returned list is limited to
 that of the shortest argument. strs are unpacked into lists of one
-character-long strs. If only a single list is provided, operates on the contents
+character-long strs. If only a single list is passed, operates on the contents
 of the list instead of the list itself.
 Alias: `::`
 
@@ -1257,7 +1367,7 @@ q>> (zip (0 1 2) \"hello world\") ; evaluates to ((0 \"h\") (1 \"e\") (2 \"l\"))
 "
 Compute the Cartesian product of two or more lists or strs. The returned value
 is a list of lists. str arguments are unpacked into lists of one character-long
-strs. If only a single list is provided, operates on the contents of the list
+strs. If only a single list is passed, operates on the contents of the list
 instead of the list itself.
 Alias: `:*:`
 
@@ -1308,116 +1418,6 @@ q>> (index-of \"hello world\" \"a\") ; evaluates to -1
         ),
 
 /*
- * systems
- */
-
-        "format" => (
-            "Substitute values for patterns in a str.",
-"
-Substitute values for patterns in a format string.
-Alias: `$`
-
-Expected form:
-(format <format string> <values>...)
-
-Example:
-q>> (format \"hello, {}!\" \"John\") ; evaluates to \"hello, John!\"
-q>> (format \"{:.5}\" 3.141592653589793238) ; evaluates to \"3.14159\"
-",
-        ),
-
-        "print" => (
-            "Print a formatted str to STDOUT.",
-"
-Substitute values for patterns in a format string and print to STDOUT. If a
-single value is passed, the value is returned; if multiple values are passed,
-they are all returned in a list.
-Alias: `$-`
-
-Expected form:
-(print <format string> <values>...)
-
-Example:
-q>> (print \"hello {}!\" \"John\") ; prints `hello John!` and evaluates to \"John\"
-q>> ; passed values are returned, so `print` can be inserted in the middle of
-q>> ; other expressions
-q>> (+ (print \"{}\" (* 2 3)) 5) ; prints `6` and evaluates to 11
-",
-        ),
-
-        "println" => (
-            "Print a formatted str to STDOUT with a newline appended.",
-"
-Substitute values for patterns in a format string and print to STDOUT with
-newline appended. If a single value is passed, the value is returned; if
-multiple values are passed, they are all returned in a list.
-Alias: `$_`
-
-Expected form:
-(println <format string> <values>...)
-
-Example:
-q>> (println \"hello {}!\" \"John\") ; prints `hello John!\\n` and evaluates to \"John\"
-q>> ; passed values are returned, so `print` can be inserted in the middle of
-q>> ; other expressions
-q>> (+ (println \"{}\" (* 2 3)) 5) ; prints `6\\n` and evaluates to 11
-",
-        ),
-
-        "halt" => (
-            "Halt execution of a program with an error message.",
-"
-Substitute values for patterns in a format string and return the result as an
-error.
-Alias: `!!`
-
-Expected form:
-(halt <format string> <values>...)
-
-Example:
-q>> (defn a -1)
-q>> (if (> a 0) (* a 2) (halt \"expected a positive value, but got {}\" a))
-",
-        ),
-
-        "istype" => (
-            "Test the type of a value.",
-"
-Returns `true` if a value is of a given type or list of types, `false`
-otherwise. Types must be specified as strs. Available type names are: `bool`,
-`int`, `float`, `complex`, `list`, `str`, `function`, `any`.
-Alias: `~?`
-
-Expected form:
-(istype <type or list of types> <value>)
-
-Example:
-q>> (def z 5i)
-q>> (istype \"complex\" z) ; evaluates to true
-q>> (def reals (\"bool\" \"int\" \"float\"))
-q>> (if (istype reals z) 0 1) ; evaluates to 1
-",
-        ),
-
-        "type" => (
-            "Get the type(s) of one or more values.",
-"
-Get the type(s) of one or more values as strs. If one value is passed, the
-result is returned as a single string, otherwise a list of strings is returned.
-Possible return values are \"bool\", \"int\", \"float\", \"complex\", \"list\",
-\"str\", \"function\".
-Alias: `?~`
-
-Expected form:
-(type <values>...)
-
-Example:
-q>> (type true) ; evaluates to \"bool\"
-q>> (type true 1 1.0 1i) ; evaluates to (\"bool\" \"int\" \"float\" \"complex\")
-",
-        ),
-
-/*
  * element-wise math
  */
 
@@ -1425,9 +1425,9 @@ q>> (type true 1 1.0 1i) ; evaluates to (\"bool\" \"int\" \"float\" \"complex\")
             "Logical and arithmetic negative.",
 "
 Logical and arithmetic negative: For each input, returns the logical negation
-for booleans and additive inverse for other numerical types. If there is only
-one value, the output is a single value; otherwise results are returned in a
-list.
+for booleans and additive inverse for other numerical types. If a single list is
+passed, operates on the contents of the list instead of the list itself.
+Alias: `!`
 
 Expected form:
 (neg <values>...)
@@ -1439,16 +1439,33 @@ q>> (neg false 1.0546) ; evaluates to (true -1.0546)
 ",
         ),
 
-        // recip
+        "recip" => (
+            "Scalar multiplicative inverse.",
+"
+Scalar multiplicative inverse: For each input x, returns the multiplicative
+inverse 1/x. If a single list is passed, operates on the contents of the list
+instead of the list itself. Output values are always floats, complexes, or lists
+thereof.
+Alias: `1/`
+
+Expected form:
+(recip <values>...)
+
+Example:
+q>> (recip 2) ; evaluates to 0.5
+q>> (recip 1+1i) ; evaluates to 0.5+0.5i
+",
+        ),
 
         "abs" => (
             "Absolute value operation.",
 "
-Absolute value operation for single numbers or a list of numbers.
+Absolute value operation for single numbers or a list of numbers. If a single
+list is passed, operates on the contents of the list instead of the list itself.
 Alias: `|.|`
 
 Expected form:
-(abs <value of list of values>)
+(abs <values>...)
 
 Example:
 q>> (abs -5) ; evaluates to 5
@@ -1456,31 +1473,406 @@ q>> (abs (-4 3.2 3+4i)) ; evaluates to (4 3.2 5.0)
 ",
         ),
 
-        // sqrt
-        // cbrt
-        // exp
-        // floor
-        // ceil
-        // round
-        // ln
-        // sin
-        // cos
-        // tan
-        // asin
-        // acos
-        // atan
-        // atan2
-        // sinh
-        // cosh
-        // tanh
-        // asinh
-        // acosh
-        // atanh
-        // arg
-        // cis
-        // conj
-        // real
-        // imag
+        "sqrt" => (
+            "Square-root operation.",
+"
+Square-root operation for single numbers or a list of numbers. If a single list
+is passed, operates on the contents of the list instead of the list itself.
+Output values are always floats, complexes, or lists thereof.
+
+Expected form:
+(sqrt <values>...)
+
+Example:
+q>> (sqrt 2) ; evaluates to 1.4142135623720951
+q>> (sqrt (-1 -1+0i)) ; evaluates to (NaN 0+1i)
+",
+        ),
+
+        "cbrt" => (
+            "Cube-root operation.",
+"
+Cube-root operation for single numbers or a list of numbers. If a single list
+is passed, operates on the contents of the list instead of the list itself.
+Output values are always floats, complexes, or lists thereof.
+
+Expected form:
+(cbrt <values>...)
+
+Example:
+q>> (cbrt 2) ; evaluates to 1.2599210498948734
+q>> (cbrt (-1 -1+0i)) ; evaluates to (-1, 0.5+0.8660254037844386i)
+",
+        ),
+
+        "exp" => (
+            "Exponential function.",
+"
+Exponential function for single numbers or a list of numbers. If a single list
+is passed, operates on the contents of the list instead of the list itself.
+Output values are always floats, complexes, or lists thereof.
+Alias: `e**`
+
+Expected form:
+(exp <values>...)
+
+Example:
+q>> (exp 1) ; evaluates to 2.718281828459045
+q>> (exp (* 1i PI)) ; evaluates to -1+0i
+",
+        ),
+
+        "floor" => (
+            "Floor operation.",
+"
+Floor operation for single numbers or a list of numbers. If a single list is
+passed, operates on the contents of the list instead of the list itself. Output
+values are always ints or lists thereof.
+Alias: `~_`
+
+Expected form:
+(floor <values>...)
+
+Example:
+q>> (floor 5.2) ; evaluates to 5
+q>> (floor (2.25 -5.2 -7.9)) ; evaluates to (2 -6 -8)
+",
+        ),
+
+        "ceil" => (
+            "Ceiling operation.",
+"
+Ceiling operation for single numbers or a list of numbers. If a single list is
+passed, operates on the contents of the list instead of the list itself. Output
+values are always ints or lists thereof.
+Alias: `~^`
+
+Expected form:
+(ceil <values>...)
+
+Example:
+q>> (ceil 5.2) ; evaluates to 6
+q>> (ceil (2.25 -5.2 -7.9)) ; evaluates to (3 -5 -7)
+",
+        ),
+
+        "round" => (
+            "Round to the nearest int.",
+"
+Round real numbers to the nearest integer. If a single list is passed, operates
+on the contents of the list instead of the list itself. Output values are always
+ints or lists thereof.
+Alias: `~:`
+
+Expected form:
+(round <values>...)
+
+Example:
+q>> (round 5.5 6.5 -7.5) ; evaluates to (6 7 -8)
+q>> (round (4.2 -7.8 1.9) ; evaluates to (4 -8 2)
+",
+        ),
+
+        "ln" => (
+            "Natural logarithm function.",
+"
+Natural logarithm function. For complex input z, this function satisfies
+    -π ≤ arg(ln(z)) ≤ π.
+If a single list is passed, operates on the contents of the list instead of the
+list itself. Outputs are always floats, complexes, or lists thereof.
+
+Expected form:
+(ln <values>...)
+
+Example:
+q>> (ln 2) ; evaluates to 0.6931471805599453
+q>> (ln 1j) ; evaluates to 0+1.5707963267948966i
+q>> (ln (1 2j)) ; evaluates to (0 0.6931471805599453+1.5707963267948966i)
+",
+        ),
+
+        "sin" => (
+            "Sine function.",
+"
+Sine function. If a single list is passed, operates on the contents of the list
+instead of the list itself. Outputs are always floats, complexes, or lists
+thereof.
+
+Expected form:
+(sin <values>...)
+
+Example:
+q>> (sin (0 (/ PI 2))) ; evaluates to (0 1)
+",
+        ),
+
+        "cos" => (
+            "Cosine function.",
+"
+Cosine function. If a single list is passed, operates on the contents of the
+list instead of the list itself. Outputs are always floats, complexes, or lists
+thereof.
+
+Expected form:
+(cos <values>...)
+
+Example:
+q>> (cos (0 (/ PI 2))) ; evaluates to (1 0)
+",
+        ),
+
+        "tan" => (
+            "Tangent function.",
+"
+Tangent function. If a single list is passed, operates on the contents of the
+list instead of the list itself. Outputs are always floats, complexes, or lists
+thereof.
+
+Expected form:
+(tan <values>...)
+
+Example:
+q>> (tan (0 (/ PI 4))) ; evaluates to (0 1)
+",
+        ),
+
+        "arcsin" => (
+            "Arcsine function.",
+"
+Arcsine function. If a single list is passed, operates on the contents of the
+list instead of the list itself. Outputs are always floats, complexes, or lists
+thereof.
+Alias: `asin`
+
+Expected form:
+(arcsin <values>...)
+
+Example:
+q>> (arcsin (0 1)) ; evaluates to (0 1.5707963267948966)
+",
+        ),
+
+        "arccos" => (
+            "Arccosine function.",
+"
+Arccosine function. If a single list is passed, operates on the contents of the
+list instead of the list itself. Outputs are always floats, complexes, or lists
+thereof.
+Alias: `acos`
+
+Expected form:
+(arccos <values>...)
+
+Example:
+q>> (arccos (0 1)) ; evaluates to (1.5707963267948966 0)
+",
+        ),
+
+        "arctan" => (
+            "Arctangent function.",
+"
+Arctangent function. If a single list is passed, operates on the contents of the
+list instead of the list itself. Outputs are always floats, complexes, or lists
+thereof.
+Alias: `atan`
+
+Expected form:
+(arctan <values>...)
+
+Example:
+q>> (arctan (0 1)) ; evaluates to (0 0.7853981633974483)
+",
+        ),
+
+        "arctan2" => (
+            "Four-quadrant arctangent function.",
+"
+Four-quadrant arctangent function. Expects arguments to be two-item lists with
+the first being the y-coordinate. If a single list of length not equal to 2 is
+passed, operates on the contents of the list instead of the list itself. Outputs
+are always floats, complexes, or lists thereof.
+Alias: `atan2`
+
+Expected form:
+(arctan2 <values>...)
+
+Example:
+q>> (arctan2 (1 1)) ; evaluates to 0.7853981633974483
+q>> (arctan2 (-1 -1)) ; evaluates to -2.356194490192345
+",
+        ),
+
+        "sinh" => (
+            "Hyperbolic sine function.",
+"
+Hyperbolic sine function. If a single list is passed, operates on the contents
+of the list instead of the the list itself. Outputs are always floats,
+complexes, or lists thereof.
+
+Expected form:
+(sinh <values>...)
+
+Example:
+q>> (sinh (0 1)) ; evaluates to (0 1.1752011936438014)
+",
+        ),
+
+        "cosh" => (
+            "Hyperbolic cosine function.",
+"
+Hyperbolic cosine function. If a single list is passed, operates on the contents
+of the list instead of the list itself. Outputs are always floats, complexes,
+or lists thereof.
+
+Expected form:
+(cosh <values>...)
+
+Example:
+q>> (cosh (0 1)) ; evaluates to (1 1.5430806348152437)
+",
+        ),
+
+        "tanh" => (
+            "Hyperbolic tangent function.",
+"
+Hyperbolic tangent function. If a single list is passed, operates on the
+contents of the list instead of the list itself. Outputs are always floats,
+complexes, or lists thereof.
+
+Expected form:
+(tanh <values>...)
+
+Example:
+q>> (tanh (0 1)) ; evaluates to (0 0.7615941559557649)
+",
+        ),
+
+        "arsinh" => (
+            "Area hyperbolic sine function.",
+"
+Area hyperbolic sine function. If a single list is passed, operates on the
+contents of the list instead of the list itself. Outputs are always floats,
+complexes, or lists thereof.
+Alias: `asinh`
+
+Expected form:
+(arsinh <values>...)
+
+Example:
+q>> (arsinh (0 1)) ; evaluates to (0 0.8813735870195429)
+",
+        ),
+
+        "arcosh" => (
+            "Area hyperbolic cosine function.",
+"
+Area hyperbolic cosine function. If a single list is passed, operates on the
+contents of the list instead of the list itself. Outputs are always floats,
+complexes, or lists thereof.
+Alias: `acosh`
+
+Expected form:
+(arcosh <values>...)
+
+Example:
+q>> (arcosh (0 1)) ; evaluates to (NaN 0)
+",
+        ),
+
+        "artanh" => (
+            "Area hyperbolilc tangent function.",
+"
+Area hyperbolic tangent function. If a single list is passed, operates on the
+contents of the list instead of the list itself. Outputs are always floats,
+complexes, or lists thereof.
+Alias: `atanh`
+
+Expected form:
+(artanh <values>...)
+
+Example:
+q>> (artanh (0 1)) ; evaluates to (0 inf)
+",
+        ),
+
+        "arg" => (
+            "Complex number argument.",
+"
+Returns the argument (polar angle) of a complex number. Returned values are
+restricted to the range (-π, +π]. If a single list is passed, operates on the
+contents of the list instead of the list itself. Outputs are always floats or
+lists thereof.
+
+Expected form:
+(arg <values>...)
+
+Example:
+q>> (arg 1i) ; evaluates to 1.5707963267948966
+q>> (arg (0 -1)) ; evaluates to (NaN 3.141592653589793)
+",
+        ),
+
+        "cis" => (
+            "Cis function.",
+"
+Cis (cosine-i-sine) function. If a single list is passed, operates on the
+contents of the list instead of the list itself. Outputs are always complexes or
+lists thereof.
+Alias: `e**i`
+
+Expected form:
+(cis <values>...)
+
+Example:
+q>> (cis (0 (/ PI 2) PI)) ; evaluates to (1+0i 0+1i -1+0i)
+",
+        ),
+
+        "conj" => (
+            "Complex conjugate operation.",
+"
+Complex conjugate operation. If a single list is passed, operates on the
+contents of the list instead of the list itself.
+Alias: `~z`
+
+Expected form:
+(conj <values>...)
+
+Example:
+q>> (conj (1+1i 5)) ; evaluates to (1-1i 5)
+",
+        ),
+
+        "real" => (
+            "Real part of a number.",
+"
+Get the real part of a number. If a single list is passed, operates on the
+contents of the list instead of the list itself.
+Alias: `Re`
+
+Expected form:
+(real <values>...)
+
+Example:
+q>> (real (1+1i 1+2i 2+2i)) ; evaluates to (1.0 1.0 2.0)
+",
+        ),
+
+        "imag" => (
+            "Imaginary part of a number.",
+"
+Get the imaginary part of a number. If a single list is passed, operates on the
+contents of the list instead of the list itself.
+Alias: `Im`
+
+Expected form:
+(imag <values>...)
+
+Example:
+q>> (imag (1+1i 1+2i 2+2i)) ; evaluates to (1.0 2.0 2.0)
+",
+        ),
+
 
 /*
  * parameterized element-wise math
@@ -1489,49 +1881,224 @@ q>> (abs (-4 3.2 3+4i)) ; evaluates to (4 3.2 5.0)
         "mod" => (
             "Modulo operator.",
 "
-Modulo operator for single numbers or a list of numbers. Returned values are
+Modulo operator for single numbers or lists of numbers. Returned values are
 non-negative.
 Alias: `%`
 
 Expected form:
-(mod <modulo> <value>)
+(mod <value> <modulo>)
 
 Example:
-q>> (mod 2.5 -5.5) ; evaluates to 2.0
-q>> (mod 10 (range 5 15)) ; evaluates to (5 6 7 8 9 0 1 2 3 4)
+q>> (mod -5.5 2.5) ; evaluates to 2.0
+q>> (mod (range 5 15) 10) ; evaluates to (5 6 7 8 9 0 1 2 3 4)
+q>> (mod 10 (range 5 15)) ; evaluates to (0 4 3 2 1 0 10 10 10 10)
+q>> (mod (3 4 5) (3 4 5)) ; evluates to (0 0 0)
 ",
         ),
 
-        // log
-        // pow
+        "log" => (
+            "Logarithm operation.",
+"
+Logarithm operation for single numbers or lists of numbers. Returned values are
+always floats, complexes, or lists thereof.
+
+Expected form:
+(log <base> <value>)
+
+Example:
+q>> (log 2 128) ; evaluates to 7.0
+q>> (log 2 (1 2 4 8 16 32)) ; evaluates to (0.0 1.0 2.0 3.0 4.0 5.0)
+q>> (log (2 E 10) 100) ; evaluates to (6.643856189774725, 4.605170185988092, 2)
+q>> (log (4 5 6) (4 5 6)) ; evaluates to (1.0 1.0 1.0)
+",
+        ),
+
+        "pow" => (
+            "Exponentiation with arbitrary base.",
+"
+Exponentiation with arbitrary base.
+Alias: `**`
+
+Expected form:
+(pow <base> <exponent>)
+
+Example:
+q>> (pow 2 8) ; evaluates to 256
+q>> (pow 2 (0 1 2 3 4 5)) ; evaluates to (1 2 4 8 16 32)
+q>> (pow (1 2 3 4 5) 2) ; evaluates to (1 4 9 16 25)
+q>> (pow (1 2 3 4) (1 2 3 4)) ; evaluates to (1 4 27 256)
+",
+        ),
+
 
 /*
  * list -> list math
  */
 
-        // convolve
-        // histogram
-        // histogram-prob
+        "convolve" => (
+            "Discrete-valued convolution.",
+"
+Discrete-valued convolution operation between two lists of numbers. Returns
+values obtained from all points of non-zero overlap; the returned list contains
+N + M - 1 values, where N and M are the lengths of the two argument lists.
+Alias: `{*}`
+
+Expected form:
+(convolve <list1> <list2>)
+
+Example:
+q>> (convolve (1 2 3 4 5) (6 7 8)) ; evaluates to (6 19 40 61 82 67 40)
+",
+        ),
+
+        "hist" => (
+            "Count elements of a data set in a histogram.",
+"
+Count elements of a data set in a histogram. Returns a list containing pairs
+where, in each pair, the first element is a value and the second is the number
+of times it occurs in the data set.
+Alias: `|#|`
+
+Expected form:
+(hist <data>)
+
+Example:
+q>> (hist (\"a\" \"b\" \"c\" \"a\")) ; evaluates to ((\"a\" 2) (\"b\" 1) (\"c\" 1))
+",
+        ),
+
+        "hist-prob" => (
+            "Count elements of a data set as probabilities in a histogram.",
+"
+Count elements of a data set as probabilities in a histogram. Returns a list
+containins pairs where, in each pair, the first element is a value and the
+second is the number of times it occurs in the data set, normalized to the
+length of the data set.
+Alias: `|p|`
+
+Expected form:
+(hist-prob <data>)
+
+Example:
+q>> (hist-prob (\"a\" \"b\" \"c\" \"a\")) ; evaluates to ((\"a\" 0.5) (\"b\" 0.25) (\"c\" 0.25))
+",
+        ),
+
+        "covariance" => (
+            "Covariance matrix for N-dimensional data.",
+"
+Calculates the NxN covariance matrix for N-dimensional data, passed as a list of
+N-item lists of numbers.
+Alias: `Cov`
+
+Expected form:
+(covariance <data>)
+
+Example:
+q>> (covariance ((1 2) (1 1) (2 5) (2 4))) ; evaluates to ((0.25 0.75) (0.75 2.5))
+",
+        ),
+
+        "correlation" => (
+            "Pearson correlation matrix for N-dimensional data.",
+"
+Calculates the NxN Pearson correlation matrix for N-dimensional data, passed as
+a list of N-item lists of numbers.
+Alias: `Corr`
+
+Expected form:
+(correlation <data>)
+
+Example:
+q>> (correlation ((1 2) (1 1) (2 5) (2 4))) ; evaluates to ((1 0.948) (0.948 1))
+",
+        ),
+
         // fft
         // ifft
-        // findpeaks
-        // covariance
-        // correlation
 
 /*
  * list -> value math
  */
 
-        // mean
-        // variance
-        // stddev
+        "mean" => (
+            "Mean of a data set.",
+"
+Finds the mean of a (scalar) data set.
+Alias: `{E}`
+
+Expected form:
+(mean <data>)
+
+Example:
+q>> (mean (1 6 3 5 7 9 0 4 2 6 4 3 7)) ; evaluates to 4.384615384615385
+",
+        ),
+
+        "variance" => (
+            "Variance of a data set.",
+"
+Finds the variance of a (scalar) data set.
+Alias: `Var`
+
+Expected form:
+(variance <data>)
+
+Example:
+q>> (variance (1 6 3 5 7 9 0 4 2 6 4 3 7)) ; evaluates to 6.236686390532544
+",
+        ),
+
+        "stddev" => (
+            "Standard deviation of a data set.",
+"
+Finds the standard deviation of a (scalar) data set.
+Alias: `Std`
+
+Expected form:
+(stddev <data>)
+
+Example:
+q>> (stddev (1 6 3 5 7 9 0 4 2 6 4 3 7)) ; evaluates to 2.497335858576604
+",
+        ),
 
 /*
  * list+1 -> value math
  */
 
-        // pnorm
-        // moment
+        "pnorm" => (
+            "P-norm of a N-dimensional value.",
+"
+Finds the p-norm of an N-dimensional value (passed as a list of numbers) for
+given p.
+Alias: `|+|`
+
+Expected form:
+(pnorm <p> <value>)
+
+Example:
+q>> (pnorm 2 (3 4)) ; evaluates to 5.0
+q>> (pnorm 1 (3 4)) ; evaluates to 7.0
+",
+        ),
+
+        "moment" => (
+            "N-th moment of a data set.",
+"
+Finds the N-th moment of a (scalar) data set for given N.
+Alias: `{En}`
+
+Expected form:
+(moment <N> <data>)
+
+Example:
+q>> (moment 0 (1 6 3 5 7 9 0 4 2 6 4 3 7)) ; evaluates to 1.0
+q>> (moment 1 (1 6 3 5 7 9 0 4 2 6 4 3 7)) ; evaluates to 4.384615384615385
+q>> (moment 2 (1 6 3 5 7 9 0 4 2 6 4 3 7)) ; evaluates to 25.46153846153846
+",
+        ),
+
 
 /*
  * special-arg math
@@ -1542,16 +2109,19 @@ q>> (mod 10 (range 5 15)) ; evaluates to (5 6 7 8 9 0 1 2 3 4)
     };
 
 static FUNCTION_SYMBOLS: phf::Map<&'static str, &'static str> = phf_map! {
-    // special functions -- require direct use of the environment in some way
+    // special functions -- keyword-like
     ":="    => "def",
     ":=*"   => "let",
     "@:"    => "fn",
     "@:="   => "defn",
     "=>"    => "if",
-    "&&"    => "and",
-    "||"    => "or",
-    "^"     => "xor",
-    // others -- implemented in qlisp::functions
+    // systems
+    "$"     => "format",
+    "$-"    => "print",
+    "$_"    => "println",
+    "!!"    => "halt",
+    "~?"    => "istype",
+    "?~"    => "type",
     // arithmetic
     "+"     => "add",
     "-"     => "sub",
@@ -1559,6 +2129,9 @@ static FUNCTION_SYMBOLS: phf::Map<&'static str, &'static str> = phf_map! {
     "/"     => "div",
     "//"    => "idiv",
     // boolean comparisons
+    "&&"    => "and",
+    "||"    => "or",
+    "^"     => "xor",
     "="     => "eq",
     "!="    => "neq",
     ">"     => "gt",
@@ -1619,13 +2192,6 @@ static FUNCTION_SYMBOLS: phf::Map<&'static str, &'static str> = phf_map! {
     // iterable testing
     "*="    => "contains",
     "#*="   => "index-of",
-    // systems
-    "$"     => "format",
-    "$-"    => "print",
-    "$_"    => "println",
-    "!!"    => "halt",
-    "~?"    => "istype",
-    "?~"    => "type",
     // element-wise math
     "!"     => "neg",
     "1/"    => "recip",
@@ -1645,11 +2211,10 @@ static FUNCTION_SYMBOLS: phf::Map<&'static str, &'static str> = phf_map! {
     "{*}"   => "convolve",
     "|#|"   => "histogram",
     "|p|"   => "histogram-prob",
-    "{F}"   => "fft",
-    "{iF}"  => "ifft",
-    "^?"    => "findpeaks",
     "Cov"   => "covariance",
     "Corr"  => "correlation",
+    "{F}"   => "fft",
+    "{iF}"  => "ifft",
     // list -> value math
     "{E}"   => "mean",
     "Var"   => "variance",
@@ -1753,10 +2318,10 @@ impl<'a> ReplEnv for QEnv<'a> {
                         },
                     }
                 } else {
-                    self.eval(exp).map(|qexp| ReplOut::Print(qexp))
+                    self.eval(exp).map(ReplOut::as_print)
                 }
             },
-            _ => self.eval(exp).map(|qexp| ReplOut::Print(qexp)),
+            _ => self.eval(exp).map(ReplOut::as_print),
         };
     }
 
@@ -1771,7 +2336,7 @@ impl<'a> ReplEnv for QEnv<'a> {
     }
 
     fn repl_eval_help(&mut self, args: &[QExp]) -> QResult<QExp> {
-        if args.len() == 0 {
+        if args.is_empty() {
             let mut topics: Vec<(&'static str, &'static str)>
                 = (&HELP_TEXT).into_iter()
                 .map(|(t, (s, _))| (*t, *s))

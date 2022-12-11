@@ -51,7 +51,12 @@ macro_rules! qerr_fmt(
     }
 );
 
-pub const PROTECTED: &'static [&'static str] = &[
+pub const PROTECTED: &[&str] = &[
+    // constants
+    "PI", "2PI", "iPI", "i2PI",
+    "E",
+    "inf", "inF", "iNf", "iNF", "Inf", "InF", "INf", "INF",
+    "nan", "naN", "nAn", "nAN", "Nan", "NaN", "NAn", "NAN",
     // special -- keyword-like
     "def",              ":=",   // done
     "let",              ":=*",  // done
@@ -159,16 +164,16 @@ pub const PROTECTED: &'static [&'static str] = &[
     "sin",                      //
     "cos",                      //
     "tan",                      //
-    "asin",                     //
-    "acos",                     //
-    "atan",                     //
-    "atan2",                    //
+    "arcsin",           "asin", //
+    "arccos",           "acos", //
+    "arctan",           "atan", //
+    "arctan2",          "atanh",//
     "sinh",                     //
     "cosh",                     //
     "tanh",                     //
-    "asinh",                    //
-    "acosh",                    //
-    "atanh",                    //
+    "arsinh",           "asinh",//
+    "arcosh",           "acosh",//
+    "artanh",           "atanh",//
     "arg",                      //
     "cis",              "e**i", //
     "conj",             "~z",   //
@@ -180,8 +185,8 @@ pub const PROTECTED: &'static [&'static str] = &[
     "pow",              "**",   //
     // list -> list math
     "convolve",         "{*}",  //
-    "histogram",        "|#|",  //
-    "histogram-prob",   "|p|",  //
+    "hist",             "|#|",  //
+    "hist-prob",        "|p|",  //
     "fft",              "{F}",  //
     "ifft",             "{iF}", //
     "findpeaks",        "^?",   //
@@ -450,7 +455,7 @@ impl From<usize> for QExpType {
 }
 
 impl QExpType {
-    pub fn eq_user(&self, other: &Self) -> bool {
+    pub fn equals_user(&self, other: &Self) -> bool {
         return match self {
             qfunc!() => [qfunc!(), qlambda!()].contains(other),
             qlambda!() => [qfunc!(), qlambda!()].contains(other),
@@ -492,7 +497,7 @@ impl QExp {
     }
 
     pub fn is_type_user(&self, types: &[QExpType]) -> bool {
-        return types.iter().any(|ty| ty.eq_user(&self.exp_type()));
+        return types.iter().any(|ty| ty.equals_user(&self.exp_type()));
     }
 
     pub fn zero(ty: QExpType) -> QResult<QExp> {
@@ -516,8 +521,8 @@ impl QExp {
             qint!(i) => *i == 0,
             qfloat!(f) => *f == 0.0,
             qcomplex!(c) => *c == C64::zero(),
-            qlist!(l) => l.len() == 0,
-            qstr!(s) => s.len() == 0,
+            qlist!(l) => l.is_empty(),
+            qstr!(s) => s.is_empty(),
             _ => false,
         };
     }
@@ -623,7 +628,9 @@ impl QExp {
     }
 
     pub fn div(&self, rhs: &QExp) -> QResult<QExp> {
-        (!rhs.is_zero()).then(|| ()).ok_or(qerr!("encountered zero in div"))?;
+        (!rhs.is_zero())
+            .then(|| ())
+            .ok_or_else(|| qerr!("encountered zero in div"))?;
         let ret_type: QExpType
             = cmp::max(
                 cmp::max(self.exp_type(), rhs.exp_type()),
@@ -639,7 +646,9 @@ impl QExp {
     }
 
     pub fn idiv(&self, rhs: &QExp) -> QResult<QExp> {
-        (!rhs.is_zero()).then(|| ()).ok_or(qerr!("encountered zero in idiv"))?;
+        (!rhs.is_zero())
+            .then(|| ())
+            .ok_or_else(|| qerr!("encountered zero in idiv"))?;
         let lhs_c: QExp = convert_type_num(self, qfloat!())?;
         let rhs_c: QExp = convert_type_num(rhs,  qfloat!())?;
         return match (lhs_c, rhs_c) {
@@ -649,28 +658,70 @@ impl QExp {
     }
 
     pub fn modulo(&self, M: &QExp) -> QResult<QExp> {
-        (!M.is_zero()).then(|| ()).ok_or(qerr!("encountered zero in mod"))?;
+        (!M.is_zero())
+            .then(|| ())
+            .ok_or_else(|| qerr!("encountered zero in mod"))?;
         let ret_type: QExpType
             = cmp::max(
                 cmp::max(self.exp_type(), M.exp_type()),
                 qint!(),
             );
-        (!(ret_type > qcomplex!()))
-            .then(|| ()).ok_or(qerr!("cannot modulo by a complex value"))?;
+        (ret_type < qcomplex!())
+            .then(|| ())
+            .ok_or_else(|| qerr!("cannot modulo by a complex value"))?;
         let N_c: QExp = convert_type_num(self, ret_type)?;
         let M_c: QExp = convert_type_num(M,    ret_type)?;
-        println!("{:?} {:?}", N_c, M_c);
         return match (N_c, M_c) {
             (qint!(n), qint!(m)) => Ok(qint!(n.rem_euclid(m))),
             (qfloat!(n), qfloat!(m)) => {
-                println!("{:?}", qfloat!(n.rem_euclid(m)));
                 Ok(qfloat!(n.rem_euclid(m)))
             },
             _ => Err(qerr!("invalid type in mod")),
         };
     }
 
-    pub fn eq(&self, rhs: &QExp) -> bool {
+    pub fn log(&self, base: &QExp) -> QResult<QExp> {
+        (!base.is_zero())
+            .then(|| ())
+            .ok_or_else(|| qerr!("encountered zero base in log"))?;
+        let X_c: QExp
+            = convert_type_num(self, cmp::max(self.exp_type(), qfloat!()))?;
+        let b_c: QExp = convert_type_num(base, qfloat!())?;
+        return match (X_c, b_c) {
+            (qfloat!(x), qfloat!(b)) => Ok(qfloat!(x.log(b))),
+            (qcomplex!(x), qfloat!(b)) => Ok(qcomplex!(x.log(b))),
+            _ => Err(qerr!("invalid type in log")),
+        };
+    }
+
+    pub fn pow(&self, exponent: &QExp) -> QResult<QExp> {
+        let mut ret_type: QExpType
+            = cmp::max(
+                cmp::max(self.exp_type(), exponent.exp_type()),
+                qint!(),
+            );
+        let e_c: QExp
+            = match convert_type_num(exponent, ret_type)? {
+                qint!(i) => {
+                    if i < 0 {
+                        ret_type = qfloat!();
+                        convert_type_num(exponent, ret_type)?
+                    } else {
+                        qint!(i)
+                    }
+                },
+                q => q,
+            };
+        let b_c: QExp = convert_type_num(self, ret_type)?;
+        return match (b_c, e_c) {
+            (qint!(b), qint!(e)) => Ok(qint!(b.pow(e.unsigned_abs() as u32))),
+            (qfloat!(b), qfloat!(e)) => Ok(qfloat!(b.powf(e))),
+            (qcomplex!(b), qcomplex!(e)) => Ok(qcomplex!(b.powc(e))),
+            _ => Err(qerr!("invalid type in pow")),
+        };
+    }
+
+    pub fn equals(&self, rhs: &QExp) -> bool {
         // let ty: QExpType = cmp::max(self.exp_type(), rhs.exp_type());
         // let lhs_c: QExp = match convert_type(self, ty) {
         //     Ok(l) => l,
@@ -686,13 +737,13 @@ impl QExp {
             (qfloat!(l), qfloat!(r)) => l == r,
             (qcomplex!(l), qcomplex!(r)) => l == r,
             (qlist!(l), qlist!(r))
-                => l.iter().zip(r.iter()).all(|(lk, rk)| lk.eq(rk)),
+                => l.iter().zip(r.iter()).all(|(lk, rk)| lk.equals(rk)),
             (qstr!(l), qstr!(r)) => l == r,
             _ => false,
         };
     }
 
-    pub fn neq(&self, rhs: &QExp) -> bool { !self.eq(rhs) }
+    pub fn nequals(&self, rhs: &QExp) -> bool { !self.equals(rhs) }
 
     pub fn lt(&self, rhs: &QExp) -> QResult<bool> {
         let ty: QExpType = cmp::max(self.exp_type(), rhs.exp_type());
@@ -723,8 +774,9 @@ impl QExp {
     pub fn ge(&self, rhs: &QExp) -> QResult<bool> { Ok(!self.lt(rhs)?) }
 
     pub fn recip(&self) -> QResult<QExp> {
-        (!self.is_zero()).then(|| ())
-            .ok_or(qerr!("encountered zero in recip"))?;
+        (!self.is_zero())
+            .then(|| ())
+            .ok_or_else(|| qerr!("encountered zero in recip"))?;
         return match self {
             qbool!(b) => Ok(qfloat!((*b as u8 as f64).recip())),
             qint!(i) => Ok(qfloat!((*i as f64).recip())),
@@ -960,21 +1012,18 @@ impl QExp {
         return match self {
             qbool!(_) => Ok(qfloat!(0.0)),
             qint!(i) => Ok(qfloat!(
-                if *i > 0 {
-                    0.0
-                } else if *i < 0 {
-                    std::f64::consts::PI
-                } else {
-                    f64::NAN
+                match i.cmp(&0) {
+                    cmp::Ordering::Greater => 0.0,
+                    cmp::Ordering::Less => std::f64::consts::PI,
+                    cmp::Ordering::Equal => f64::NAN,
                 }
             )),
             qfloat!(f) => Ok(qfloat!(
-                if *f > 0.0 {
-                    0.0
-                } else if *f < 0.0 {
-                    std::f64::consts::PI
-                } else {
-                    f64::NAN
+                match f.partial_cmp(&0.0) {
+                    Some(cmp::Ordering::Greater) => 0.0,
+                    Some(cmp::Ordering::Less) => std::f64::consts::PI,
+                    Some(cmp::Ordering::Equal) => f64::NAN,
+                    None => f64::NAN,
                 }
             )),
             qcomplex!(c) => Ok(qfloat!(c.arg())),
@@ -1025,7 +1074,7 @@ impl QExp {
 }
 
 impl PartialEq for QExp {
-    fn eq(&self, other: &QExp) -> bool { self.eq(other) }
+    fn eq(&self, other: &QExp) -> bool { self.equals(other) }
 }
 
 impl fmt::Debug for QExp {
@@ -1211,6 +1260,8 @@ impl Indexable {
         };
     }
 
+    pub fn is_empty(&self) -> bool { self.len() == 0 }
+
     pub fn get(&self, idx: usize) -> Option<QExp> {
         return match self {
             Indexable::List(l) => l.get(idx).cloned(),
@@ -1285,7 +1336,9 @@ impl Indexable {
         };
     }
 
-    pub fn slice_inc(&self, beg: usize, end: usize, step: usize) -> QResult<QExp> {
+    pub fn slice_inc(&self, beg: usize, end: usize, step: usize)
+        -> QResult<QExp>
+    {
         if step == 0 {
             return Err(qerr!("step must not be 0"));
         }
@@ -1353,7 +1406,7 @@ impl Indexable {
                 .map(|k| {
                     l.get(*k)
                         .cloned()
-                        .ok_or(qerr_fmt!(
+                        .ok_or_else(|| qerr_fmt!(
                             "index {} out of bounds for object of length {}",
                             k, l.len()
                         ))
@@ -1364,7 +1417,7 @@ impl Indexable {
             let ss: String = idx.iter()
                 .map(|k| {
                     s.get(*k..*k + 1)
-                        .ok_or(qerr_fmt!(
+                        .ok_or_else(|| qerr_fmt!(
                             "index {} out of bounds for object of length {}",
                             k, s.len()
                         ))
@@ -1387,10 +1440,14 @@ impl Indexable {
         return match self {
             Indexable::List(l) => {
                 let mut new = l.clone();
-                if shift > 0 {
-                    new.rotate_right(shift as usize);
-                } else if shift < 0 {
-                    new.rotate_left(shift.abs() as usize);
+                match shift.cmp(&0) {
+                    cmp::Ordering::Greater => {
+                        new.rotate_right(shift as usize);
+                    },
+                    cmp::Ordering::Less => {
+                        new.rotate_left(shift.unsigned_abs() as usize);
+                    },
+                    cmp::Ordering::Equal => { },
                 }
                 Ok(qlist!(new))
             },
@@ -1406,11 +1463,11 @@ impl Indexable {
         return match self {
             Indexable::List(l)
                 => l.first().cloned()
-                .ok_or(qerr!("list must have length at least 1")),
+                .ok_or_else(|| qerr!("list must have length at least 1")),
             Indexable::Str(s)
                 => {
                     let S: String = s.chars().take(1).collect();
-                    if S.len() > 0 {
+                    if !S.is_empty() {
                         Ok(qstr!(S))
                     } else {
                         Err(qerr!("str must have length at least 1"))
@@ -1467,12 +1524,14 @@ impl Indexable {
         return match self {
             Indexable::List(l)
                 => l.last().cloned()
-                .ok_or(qerr!("list must have length at least 1")),
+                .ok_or_else(|| qerr!("list must have length at least 1")),
             Indexable::Str(s)
                 => {
                     Ok(qstr!(
                         s.chars().last()
-                        .ok_or(qerr!("str must have length at least 1"))?
+                        .ok_or_else(
+                            || qerr!("str must have length at least 1")
+                        )?
                         .to_string()
                     ))
                 },
@@ -1549,19 +1608,11 @@ impl Indexable {
         return match self {
             Indexable::List(l) => {
                 let (ll, lr): (&[QExp], &[QExp]) = l.split_at(idx);
-                Ok(qlist!(
-                    vec![
-                        qlist!(ll.iter().cloned().collect()),
-                        qlist!(lr.iter().cloned().collect()),
-                    ]
-                ))
+                Ok(qlist!(vec![qlist!(ll.to_vec()), qlist!(lr.to_vec())]))
             },
             Indexable::Str(s) => {
                 let (sl, sr): (&str, &str) = s.split_at(idx);
-                Ok(qlist!(vec![
-                    qstr!(sl.to_string()),
-                    qstr!(sr.to_string()),
-                ]))
+                Ok(qlist!(vec![qstr!(sl.to_string()), qstr!(sr.to_string())]))
             },
         };
     }
@@ -1577,9 +1628,7 @@ impl Indexable {
                     match f(&[qk.clone()])? {
                         qbool!(b) => {
                             if b {
-                                acc.push(
-                                    qlist!(mem::replace(&mut cur, Vec::new()))
-                                );
+                                acc.push(qlist!(mem::take(&mut cur)));
                             } else {
                                 cur.push(qk.clone());
                             }
@@ -1601,11 +1650,7 @@ impl Indexable {
                     match f(&[qstr!(sk.to_string())])? {
                         qbool!(b) => {
                             if b {
-                                acc.push(
-                                    qstr!(
-                                        mem::replace(&mut cur, String::new())
-                                    )
-                                );
+                                acc.push(qstr!(mem::take(&mut cur)));
                             } else {
                                 cur.push(sk);
                             }
@@ -1635,9 +1680,7 @@ impl Indexable {
                         qbool!(b) => {
                             if b {
                                 cur.push(qk.clone());
-                                acc.push(
-                                    qlist!(mem::replace(&mut cur, Vec::new()))
-                                );
+                                acc.push(qlist!(mem::take(&mut cur)));
                             } else {
                                 cur.push(qk.clone());
                             }
@@ -1660,11 +1703,7 @@ impl Indexable {
                         qbool!(b) => {
                             if b {
                                 cur.push(sk);
-                                acc.push(
-                                    qstr!(
-                                        mem::replace(&mut cur, String::new())
-                                    )
-                                );
+                                acc.push(qstr!(mem::take(&mut cur)));
                             } else {
                                 cur.push(sk);
                             }
@@ -1769,7 +1808,7 @@ impl Indexable {
         return match self {
             Indexable::List(l) => {
                 let mut ll: Vec<QExp> = l.clone();
-                ll.append(&mut items.iter().cloned().collect());
+                ll.append(&mut items.to_vec());
                 Ok(qlist!(ll))
             },
             Indexable::Str(s) => {
@@ -1948,25 +1987,27 @@ impl Indexable {
         return match self {
             Indexable::List(l) => {
                 for (k, qk) in l.iter().enumerate() {
-                    if exp.eq(qk) { return Ok(qint!(k as i64)); }
+                    if exp.equals(qk) { return Ok(qint!(k as i64)); }
                 }
                 Ok(qint!(-1))
             },
             Indexable::Str(s) => {
                 match exp {
                     qstr!(sp) => {
-                        if sp.len() > s.len() {
-                            Ok(qint!(-1))
-                        } else if sp.len() == s.len() {
-                            Ok(qint!(if sp == s { -1 } else { 0 }))
-                        } else {
-                            let n: usize = sp.len();
-                            for k in 0..s.len() - sp.len() {
-                                if sp == s.get(k..k + n).unwrap() {
-                                    return Ok(qint!(k as i64));
+                        match sp.len().cmp(&s.len()) {
+                            cmp::Ordering::Greater
+                                => Ok(qint!(-1)),
+                            cmp::Ordering::Equal
+                                => Ok(qint!(if sp == s { -1 } else { 0 })),
+                            cmp::Ordering::Less => {
+                                let n: usize = sp.len();
+                                for k in 0..s.len() - sp.len() {
+                                    if sp == s.get(k..k + n).unwrap() {
+                                        return Ok(qint!(k as i64))
+                                    }
                                 }
-                            }
-                            Ok(qint!(-1))
+                                Ok(qint!(-1))
+                            },
                         }
                     },
                     _ => Err(qerr!("strs can only contain other strs")),
@@ -1995,7 +2036,7 @@ impl Indexable {
             Indexable::List(l) => {
                 let mut m: &QExp
                     = l.first()
-                    .ok_or(qerr!("expected non-empty list or str"))?;
+                    .ok_or_else(|| qerr!("expected non-empty list or str"))?;
                 for qk in l.iter() {
                     if qk.lt(m)? {
                         m = qk;
@@ -2007,7 +2048,7 @@ impl Indexable {
                 let mut m: QExp
                     = s.get(0..1)
                     .map(|s0| qstr!(s0.to_string()))
-                    .ok_or(qerr!("expected non-empty list or str"))?;
+                    .ok_or_else(|| qerr!("expected non-empty list or str"))?;
                 let mut sk: QExp;
                 for ck in s.chars() {
                     sk = qstr!(ck.to_string());
@@ -2025,9 +2066,9 @@ impl Indexable {
             Indexable::List(l) => {
                 let mut m: &QExp
                     = l.first()
-                    .ok_or(qerr!("expected non-empty list or str"))?;
+                    .ok_or_else(|| qerr!("expected non-empty list or str"))?;
                 for qk in l.iter() {
-                    if qk.gt(&m)? {
+                    if qk.gt(m)? {
                         m = qk;
                     }
                 }
@@ -2037,7 +2078,7 @@ impl Indexable {
                 let mut m: QExp
                     = s.get(0..1)
                     .map(|s0| qstr!(s0.to_string()))
-                    .ok_or(qerr!("expected non-empty list or str"))?;
+                    .ok_or_else(|| qerr!("expected non-empty list or str"))?;
                 let mut sk: QExp;
                 for ck in s.chars() {
                     sk = qstr!(ck.to_string());
@@ -2057,7 +2098,7 @@ impl Indexable {
             Indexable::List(l) => {
                 let mut m: &QExp
                     = l.first()
-                    .ok_or(qerr!("expected non-empty list or str"))?;
+                    .ok_or_else(|| qerr!("expected non-empty list or str"))?;
                 for qk in l.iter().skip(1) {
                     match f(&[qk.clone(), m.clone()])? {
                         qbool!(b) => { if b { m = qk; } },
@@ -2073,7 +2114,7 @@ impl Indexable {
                 let mut m: QExp
                     = s.get(0..1)
                     .map(|s0| qstr!(s0.to_string()))
-                    .ok_or(qerr!("expected non-empty list or str"))?;
+                    .ok_or_else(|| qerr!("expected non-empty list or str"))?;
                 let mut sk: QExp;
                 for ck in s.chars().skip(1) {
                     sk = qstr!(ck.to_string());
@@ -2288,7 +2329,7 @@ impl Indexable {
         return if let Indexable::List(l) = self {
             let n: usize = self.len();
             let mut to: Vec<usize>;
-            let mut ret: Vec<QExp> = l.iter().cloned().collect();
+            let mut ret: Vec<QExp> = l.to_vec();
             for p in moves.iter() {
                 if p.len() < 2 {
                     return Err(qerr!(
@@ -2431,7 +2472,7 @@ pub fn convert_numbers_sametype(args: &[QExp])
     let exp_type: QExpType
         = cmp::max(
             args.iter().map(|qexp| qexp.exp_type()).max()
-                .ok_or(qerr!("expected at least one item"))?,
+                .ok_or_else(|| qerr!("expected at least one item"))?,
             qint!(),
         );
     if exp_type > qcomplex!() {
@@ -2477,7 +2518,7 @@ pub fn tokenize(input: String) -> QResult<Vec<String>> {
             TokenState::Normal => match x {
                 ';' => {
                     if !term.is_empty() {
-                        ret.push(mem::replace(&mut term, String::new()));
+                        ret.push(mem::take(&mut term));
                     }
                     state = TokenState::InComment;
                 },
@@ -2490,13 +2531,13 @@ pub fn tokenize(input: String) -> QResult<Vec<String>> {
                 },
                 '(' | ')' => {
                     if !term.is_empty() {
-                        ret.push(mem::replace(&mut term, String::new()));
+                        ret.push(mem::take(&mut term));
                     }
                     ret.push(x.to_string());
                 },
                 ' ' | ',' | '\n' => {
                     if !term.is_empty() {
-                        ret.push(mem::replace(&mut term, String::new()));
+                        ret.push(mem::take(&mut term));
                     }
                 },
                 _ => {
@@ -2510,7 +2551,7 @@ pub fn tokenize(input: String) -> QResult<Vec<String>> {
             TokenState::InString => match x {
                 '"' => {
                     term.push(x);
-                    ret.push(mem::replace(&mut term, String::new()));
+                    ret.push(mem::take(&mut term));
                     state = TokenState::Normal;
                 },
                 '\\' => {
@@ -2535,7 +2576,8 @@ pub fn tokenize(input: String) -> QResult<Vec<String>> {
         }
     }
     if !term.is_empty() {
-        ret.push(mem::replace(&mut term, String::new()));
+        ret.push(term);
+        // ret.push(mem::take(&mut term));
     }
     return Ok(ret);
 }
@@ -2555,7 +2597,7 @@ pub fn parse(tokens: &[String]) -> QResult<Vec<QExp>> {
 fn parse_single(tokens: &[String]) -> QResult<(QExp, &[String])> {
     let (token, rest)
         = tokens.split_first()
-        .ok_or(qerr!("missing closing ')'"))?;
+        .ok_or_else(|| qerr!("missing closing ')'"))?;
     return match &token[..] {
         "(" => read_sequence(rest),
         ")" => Err(qerr!("unexpected ')'")),
@@ -2569,7 +2611,7 @@ fn read_sequence(tokens: &[String]) -> QResult<(QExp, &[String])> {
     loop {
         let (next_token, rest)
             = xs.split_first()
-            .ok_or(qerr!("missing closing ')'"))?;
+            .ok_or_else(|| qerr!("missing closing ')'"))?;
         if next_token == ")" {
             return Ok((qlist!(ret), rest));
         }
@@ -2580,22 +2622,36 @@ fn read_sequence(tokens: &[String]) -> QResult<(QExp, &[String])> {
 }
 
 pub fn parse_atom(token: &str) -> QResult<QExp> {
-    return if let Ok(b) = bool::from_str(token) {
-        Ok(qbool!(b))
-    } else if let Ok(i) = i64::from_str(token) {
-        Ok(qint!(i))
-    } else if let Ok(f) = f64::from_str(token) {
-        Ok(qfloat!(f))
-    } else if let Ok(c) = C64::from_str(token) {
-        Ok(qcomplex!(c))
-    } else if token.starts_with('"') {
-        if token.ends_with('"') {
-            Ok(qstr!(token[1..token.len() - 1].to_string()))
-        } else {
-            Err(qerr!("missing closing '\"'"))
-        }
-    } else {
-        Ok(qsymbol!(token.to_string()))
+    return match token {
+        "i" | "-i" => Ok(qsymbol!(token.to_string())),
+        "PI" => Ok(qfloat!(std::f64::consts::PI)),
+        "2PI" => Ok(qfloat!(2.0 * std::f64::consts::PI)),
+        "iPI" => Ok(qcomplex!(C64 { re: 0.0, im: std::f64::consts::PI })),
+        "i2PI" => Ok(qcomplex!(
+            C64 { re: 0.0, im: 2.0 * std::f64::consts::PI }
+        )),
+        "E" => Ok(qfloat!(std::f64::consts::E)),
+        "SQRT2" => Ok(qfloat!(std::f64::consts::SQRT_2)),
+        "1/SQRT2" => Ok(qfloat!(std::f64::consts::FRAC_1_SQRT_2)),
+        _ => {
+            if let Ok(b) = bool::from_str(token) {
+                Ok(qbool!(b))
+            } else if let Ok(i) = i64::from_str(token) {
+                Ok(qint!(i))
+            } else if let Ok(f) = f64::from_str(token) {
+                Ok(qfloat!(f))
+            } else if let Ok(c) = C64::from_str(token) {
+                Ok(qcomplex!(c))
+            } else if token.starts_with('"') {
+                if token.ends_with('"') {
+                    Ok(qstr!(token[1..token.len() - 1].to_string()))
+                } else {
+                    Err(qerr!("missing closing '\"'"))
+                }
+            } else {
+                Ok(qsymbol!(token.to_string()))
+            }
+        },
     };
 }
 
@@ -2742,41 +2798,40 @@ impl<'a> Default for QEnv<'a> {
             add_fn!(env, "sin",                     fns::fn_sin           );
             add_fn!(env, "cos",                     fns::fn_cos           );
             add_fn!(env, "tan",                     fns::fn_tan           );
-            add_fn!(env, "asin",                    fns::fn_asin          );
-            add_fn!(env, "acos",                    fns::fn_acos          );
-            add_fn!(env, "atan",                    fns::fn_atan          );
-            add_fn!(env, "atan2",                   fns::fn_atan2         );
+            add_fn!(env, "arcsin",          "asin", fns::fn_asin          );
+            add_fn!(env, "arccos",          "acos", fns::fn_acos          );
+            add_fn!(env, "arctan",          "atan", fns::fn_atan          );
+            add_fn!(env, "arctan2",         "atan2",fns::fn_atan2         );
             add_fn!(env, "sinh",                    fns::fn_sinh          );
             add_fn!(env, "cosh",                    fns::fn_cosh          );
             add_fn!(env, "tanh",                    fns::fn_tanh          );
-            add_fn!(env, "asinh",                   fns::fn_asinh         );
-            add_fn!(env, "acosh",                   fns::fn_acosh         );
-            add_fn!(env, "atanh",                   fns::fn_atanh         );
+            add_fn!(env, "arsinh",          "asinh",fns::fn_asinh         );
+            add_fn!(env, "arcosh",          "acosh",fns::fn_acosh         );
+            add_fn!(env, "artanh",          "atanh",fns::fn_atanh         );
             add_fn!(env, "arg",                     fns::fn_arg           );
             add_fn!(env, "cis",             "e**i", fns::fn_cis           );
-            add_fn!(env, "conj",            "~_",   fns::fn_conj          );
+            add_fn!(env, "conj",            "~z",   fns::fn_conj          );
             add_fn!(env, "real",            "Re",   fns::fn_real          );
             add_fn!(env, "imag",            "Im",   fns::fn_imag          );
             // parameterized element-wise math
             add_fn!(env, "mod",             "%",    fns::fn_mod           );
-            // add_fn!(env, "log",                     fns::fn_log           );
-            // add_fn!(env, "pow",             "**",   fns::fn_pow           );
+            add_fn!(env, "log",                     fns::fn_log           );
+            add_fn!(env, "pow",             "**",   fns::fn_pow           );
             // list -> list math
-            // add_fn!(env, "convolve",        "{*}",  fns::fn_convolve      );
-            // add_fn!(env, "histogram",       "|#|",  fns::fn_histogram     );
-            // add_fn!(env, "histogram-prob",  "|p|",  fns::fn_histogram_prob);
+            add_fn!(env, "convolve",        "{*}",  fns::fn_convolve      );
+            add_fn!(env, "hist",            "|#|",  fns::fn_histogram     );
+            add_fn!(env, "hist-prob",       "|p|",  fns::fn_histogram_prob);
+            add_fn!(env, "covariance",      "Cov",  fns::fn_covariance    );
+            add_fn!(env, "correlation",     "Corr", fns::fn_correlation   );
             // add_fn!(env, "fft",             "{F}",  fns::fn_fft           );
             // add_fn!(env, "ifft",            "{iF}", fns::fn_ifft          );
-            // add_fn!(env, "findpeaks",       "^?",   fns::fn_findpeaks     );
-            // add_fn!(env, "covariance",      "Cov",  fns::fn_covariance    );
-            // add_fn!(env, "correlation",     "Corr", fns::fn_correlation   );
             // list -> value math
-            // add_fn!(env, "mean",            "{E}",  fns::fn_mean          );
-            // add_fn!(env, "variance",        "Var",  fns::fn_variance      );
-            // add_fn!(env, "stddev",          "Std",  fns::fn_stddev        );
+            add_fn!(env, "mean",            "{E}",  fns::fn_mean          );
+            add_fn!(env, "variance",        "Var",  fns::fn_variance      );
+            add_fn!(env, "stddev",          "Std",  fns::fn_stddev        );
             // list+1 -> value math
-            // add_fn!(env, "pnorm",           "|+|",  fns::fn_pnorm         );
-            // add_fn!(env, "moment",          "{En}", fns::fn_moment        );
+            add_fn!(env, "pnorm",           "|+|",  fns::fn_pnorm         );
+            add_fn!(env, "moment",          "{En}", fns::fn_moment        );
             // special-arg math
             // add_fn!(env, "sample",          "?.",   fns::fn_sample        );
         return QEnv { data: env, outer: None };
@@ -2786,7 +2841,9 @@ impl<'a> Default for QEnv<'a> {
 impl<'a> QEnv<'a> {
     pub fn get_data(&self) -> &HashMap<String, QExp> { &self.data }
 
-    pub fn get_outer(&'a self) -> Option<&'a QEnv<'a>> { (&self.outer).as_deref() }
+    pub fn get_outer(&'a self) -> Option<&'a QEnv<'a>> {
+        return (&self.outer).as_deref()
+    }
 
     pub fn get(&self, k: &str) -> Option<&QExp> {
         return if let Some(exp) = self.data.get(k) {
@@ -2848,7 +2905,9 @@ impl<'a> QEnv<'a> {
                         },
                         _ => {
                             let mut with_evalfirst: Vec<QExp> = vec![evalfirst];
-                            with_evalfirst.append(&mut list.iter().skip(1).cloned().collect());
+                            with_evalfirst.append(
+                                &mut list.iter().skip(1).cloned().collect()
+                            );
                             Ok(qlist!(self.eval_multi(&with_evalfirst)?))
                         },
                     }
@@ -2858,7 +2917,7 @@ impl<'a> QEnv<'a> {
             },
             qsymbol!(k)
                 => self.get_cloned(k)
-                .ok_or(qerr_fmt!("symbol '{}' is undefined", k)),
+                .ok_or_else(|| qerr_fmt!("symbol '{}' is undefined", k)),
             qfunc!(_, _) => Ok(exp.clone()),
             qlambda!(_) => Ok(exp.clone()),
         };

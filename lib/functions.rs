@@ -1,5 +1,6 @@
 use std::{
     cmp,
+    mem,
     rc::Rc,
 };
 use itertools::Itertools;
@@ -132,11 +133,19 @@ pub fn fn_let(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
 }
 
 pub fn fn_fn(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
-    fn subs_from_env(env: &mut QEnv, body_exp: &QExp) -> QExp {
+    fn subs_from_env(env: &mut QEnv, protected: &[String], body_exp: &QExp)
+        -> QExp
+    {
         return match body_exp {
-            qsymbol!(s) => env.get_cloned(s).unwrap_or(body_exp.clone()),
+            qsymbol!(s) => {
+                if protected.contains(s) {
+                    qsymbol!(s.clone())
+                } else {
+                    env.get_cloned(s).unwrap_or_else(|| body_exp.clone())
+                }
+            },
             qlist!(l) => qlist!(
-                l.iter().map(|qk| subs_from_env(env, qk)).collect()
+                l.iter().map(|qk| subs_from_env(env, protected, qk)).collect()
             ),
             q => q.clone(),
         };
@@ -146,25 +155,31 @@ pub fn fn_fn(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         return Err(qerr_fmt!(
             "fn: expected 2 args but got {}", args.len()));
     }
-    let params_exp: &QExp = match args.get(0).unwrap() {
-        qlist!(l) => {
-            if l.iter().all(|qk| qk.exp_type() == qsymbol!()) {
-                Ok(args.get(0).unwrap())
-            } else {
-                Err(qerr!("fn: function args must be a list of symbols"))
-            }
-        },
-        _ => Err(qerr!("fn: function args must be a list of symbols")),
-    }?;
+    let (params_exp, protected_symbols): (&QExp, Vec<String>)
+        = match args.get(0).unwrap() {
+            qlist!(l) => {
+                let arg_names: Vec<String>
+                    = l.iter()
+                        .map(|qk| match qk {
+                            qsymbol!(s) => Ok(s.clone()),
+                            _ => Err(qerr!(
+                                "fn: function args must be a list of symbols")),
+                        })
+                        .collect::<QResult<Vec<String>>>()?;
+                Ok((args.get(0).unwrap(), arg_names))
+            },
+            _ => Err(qerr!("fn: function args must be a list of symbols")),
+        }?;
     let body_exp: QExp
         = subs_from_env(
             env,
-            args.get(1).ok_or(qerr!("fn: missing function body"))?
+            &protected_symbols,
+            args.get(1).ok_or_else(|| qerr!("fn: missing function body"))?
         );
     return Ok(
         qlambda!(QLambda {
             params_exp: Rc::new(params_exp.clone()),
-            body_exp: Rc::new(body_exp.clone()),
+            body_exp: Rc::new(body_exp),
         })
     );
 }
@@ -196,7 +211,7 @@ pub fn fn_defn(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         _ => Err(qerr!("defn: function args must be a list of symbols")),
     }?;
     let body_exp: &QExp
-        = args.get(2).ok_or(qerr!("defn: missing function body"))?;
+        = args.get(2).ok_or_else(|| qerr!("defn: missing function body"))?;
     let function = QLambda {
         params_exp: Rc::new(params_exp.clone()),
         body_exp: Rc::new(body_exp.clone()),
@@ -225,11 +240,11 @@ pub fn fn_if(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
  */
 
 pub fn fn_format(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
-    if args.len() < 1 {
+    if args.is_empty() {
         return Err(qerr!("format: missing format string"));
     }
     let fmtstr: String = match env.eval(args.get(0).unwrap())? {
-        qstr!(s) => Ok(s.clone()),
+        qstr!(s) => Ok(s),
         _ => Err(qerr!("format: first arg must be a format string")),
     }?;
     let vals: Vec<QExp> = env.eval_multi(&args[1..])?;
@@ -240,11 +255,11 @@ pub fn fn_format(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
 }
 
 pub fn fn_print(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
-    if args.len() < 1 {
+    if args.is_empty() {
         return Err(qerr!("print: missing format string"));
     }
     let fmtstr: String = match env.eval(args.get(0).unwrap())? {
-        qstr!(s) => Ok(s.clone()),
+        qstr!(s) => Ok(s),
         _ => Err(qerr!("print: first arg must be a format string")),
     }?;
     let vals: Vec<QExp> = env.eval_multi(&args[1..])?;
@@ -261,11 +276,11 @@ pub fn fn_print(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
 }
 
 pub fn fn_println(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
-    if args.len() < 1 {
+    if args.is_empty() {
         return Err(qerr!("println: missing format string"));
     }
     let fmtstr: String = match env.eval(args.get(0).unwrap())? {
-        qstr!(s) => Ok(s.clone()),
+        qstr!(s) => Ok(s),
         _ => Err(qerr!("println: first arg must be a format string")),
     }?;
     let vals: Vec<QExp> = env.eval_multi(&args[1..])?;
@@ -282,11 +297,11 @@ pub fn fn_println(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
 }
 
 pub fn fn_halt(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
-    if args.len() < 1 {
+    if args.is_empty() {
         return Err(qerr!("halt"));
     }
     let fmtstr: String = match env.eval(args.get(0).unwrap())? {
-        qstr!(s) => Ok(s.clone()),
+        qstr!(s) => Ok(s),
         _ => Err(qerr!("halt: first arg must be a format string")),
     }?;
     let vals: Vec<QExp> = env.eval_multi(&args[1..])?;
@@ -357,7 +372,7 @@ pub fn fn_istype(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
 }
 
 pub fn fn_type(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
-    if args.len() < 1 {
+    if args.is_empty() {
         return Err(qerr_fmt!(
             "type: expected at least 1 arg but got {}", args.len()));
     }
@@ -416,8 +431,8 @@ pub fn fn_add(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         let (nums, ret_type): (Vec<QExp>, QExpType)
             = convert_numbers_sametype(args)?;
         let mut acc = QExp::zero(ret_type)?;
-        for x in nums.into_iter() {
-            acc = acc.add(&x)?;
+        for x in nums.iter() {
+            acc = acc.add(x)?;
         }
         return Ok(acc);
     }
@@ -438,7 +453,7 @@ pub fn fn_sub(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         }
         let mut acc: QExp
             = nums.first()
-            .ok_or(qerr!("expected at least one number"))?
+            .ok_or_else(|| qerr!("expected at least one number"))?
             .clone();
         for x in nums[1..].iter() {
             acc = acc.sub(x)?;
@@ -458,8 +473,8 @@ pub fn fn_mul(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         let (nums, ret_type): (Vec<QExp>, QExpType)
             = convert_numbers_sametype(args)?;
         let mut acc = QExp::one(ret_type)?;
-        for x in nums.into_iter() {
-            acc = acc.mul(&x)?;
+        for x in nums.iter() {
+            acc = acc.mul(x)?;
         }
         return Ok(acc);
     }
@@ -481,7 +496,7 @@ pub fn fn_div(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         }
         let mut acc: QExp
             = nums.first()
-            .ok_or(qerr!("expected at least one number"))?
+            .ok_or_else(|| qerr!("expected at least one number"))?
             .clone();
         for x in nums[1..].iter() {
             acc = acc.div(x)?;
@@ -510,7 +525,7 @@ pub fn fn_idiv(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         }
         let mut acc: QExp
             = nums.first()
-            .ok_or(qerr!("expected at least one number"))?
+            .ok_or_else(|| qerr!("expected at least one number"))?
             .clone();
         for x in nums[1..].iter() {
             acc = acc.idiv(x)?;
@@ -602,7 +617,7 @@ pub fn fn_neq(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
             return Ok(qbool!(true));
         }
         for x in args[1..].iter() {
-            if !first.neq(x) {
+            if !first.nequals(x) {
                 return Ok(qbool!(false));
             }
         }
@@ -950,8 +965,8 @@ pub fn fn_get(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     let idxable
         = Indexable::from_qexp(env.eval(args.get(1).unwrap())?)
         .map_err(|_| qerr!("get: second arg must be a list or str"))?;
-    return idxable.get(idx.abs() as usize)
-        .ok_or(qerr_fmt!(
+    return idxable.get(idx.unsigned_abs() as usize)
+        .ok_or_else(|| qerr_fmt!(
             "get: index {} out of bounds for object of length {}",
             idx, idxable.len()
         ));
@@ -1015,7 +1030,11 @@ pub fn fn_slice(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     let idxable
         = Indexable::from_qexp(env.eval(args.get(2).unwrap())?)
         .map_err(|_| qerr!("slice: third arg must be a list or str"))?;
-    return idxable.slice(beg.abs() as usize, end.abs() as usize, 1)
+    return idxable.slice(
+        beg.unsigned_abs() as usize,
+        end.unsigned_abs() as usize,
+        1
+    )
         .map_err(|e| e.prepend_source("slice"));
 }
 
@@ -1041,7 +1060,11 @@ pub fn fn_slice_inc(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     let idxable
         = Indexable::from_qexp(env.eval(args.get(2).unwrap())?)
         .map_err(|_| qerr!("slice-inc: third arg must be a list or str"))?;
-    return idxable.slice_inc(beg.abs() as usize, end.abs() as usize, 1)
+    return idxable.slice_inc(
+        beg.unsigned_abs() as usize,
+        end.unsigned_abs() as usize,
+        1
+    )
         .map_err(|e| e.prepend_source("slice-inc"));
 }
 
@@ -1075,9 +1098,9 @@ pub fn fn_slice_by(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         = Indexable::from_qexp(env.eval(args.get(3).unwrap())?)
         .map_err(|_| qerr!("slice-by: third arg must be a list or str"))?;
     return idxable.slice(
-        beg.abs() as usize,
-        end.abs() as usize,
-        step.abs() as usize
+        beg.unsigned_abs() as usize,
+        end.unsigned_abs() as usize,
+        step.unsigned_abs() as usize
     )
         .map_err(|e| e.prepend_source("slice-by"));
 }
@@ -1114,9 +1137,9 @@ pub fn fn_slice_inc_by(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
             qerr!("slice-inc-by: third arg must be a list or str")
         })?;
     return idxable.slice_inc(
-        beg.abs() as usize,
-        end.abs() as usize,
-        step.abs() as usize
+        beg.unsigned_abs() as usize,
+        end.unsigned_abs() as usize,
+        step.unsigned_abs() as usize
     )
         .map_err(|e| e.prepend_source("slice-inc-by"));
 }
@@ -1301,7 +1324,7 @@ pub fn fn_step_by(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     let idxable
         = Indexable::from_qexp(env.eval(args.get(1).unwrap())?)
         .map_err(|_| qerr!("step-by: second arg must be a list or str"))?;
-    return idxable.slice(0, idxable.len(), step.abs() as usize)
+    return idxable.slice(0, idxable.len(), step.unsigned_abs() as usize)
         .map_err(|e| e.prepend_source("step-by"));
 }
 
@@ -1637,7 +1660,7 @@ pub fn fn_join(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
                 let mut acc: Vec<QExp> = Vec::new();
                 for exp in args.iter() {
                     if let qlist!(l) = exp {
-                        acc.append(&mut l.iter().cloned().collect());
+                        acc.append(&mut l.to_vec());
                     } else {
                         return Err(qerr!(
                             "join: args must be all lists or all strs"));
@@ -1677,7 +1700,7 @@ pub fn fn_join_with(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
                 let mut acc: Vec<QExp> = Vec::new();
                 for (k, exp) in args.iter().enumerate() {
                     if let qlist!(l) = exp {
-                        acc.append(&mut l.iter().cloned().collect());
+                        acc.append(&mut l.to_vec());
                         if k < n - 1 {
                             acc.push(item.clone());
                         }
@@ -1836,7 +1859,7 @@ pub fn fn_index_of(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
  * element-wise math
  */
 
-macro_rules! element_wise_fn(
+macro_rules! elementwise_fn(
     ( $name:ident, $inner:ident, $method:ident ) => {
         pub fn $name(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
             fn $inner(args: &[QExp]) -> QResult<QExp> {
@@ -1858,22 +1881,22 @@ macro_rules! element_wise_fn(
     }
 );
 
-element_wise_fn!(fn_neg,    do_neg,     neg  );
-element_wise_fn!(fn_recip,  do_recip,   recip);
-element_wise_fn!(fn_abs,    do_abs,     abs  );
-element_wise_fn!(fn_sqrt,   do_sqrt,    sqrt );
-element_wise_fn!(fn_cbrt,   do_cbrt,    cbrt );
-element_wise_fn!(fn_exp,    do_exp,     exp  );
-element_wise_fn!(fn_floor,  do_floor,   floor);
-element_wise_fn!(fn_ceil,   do_ceil,    ceil );
-element_wise_fn!(fn_round,  do_round,   round);
-element_wise_fn!(fn_ln,     do_ln,      ln   );
-element_wise_fn!(fn_sin,    do_sin,     sin  );
-element_wise_fn!(fn_cos,    do_cos,     cos  );
-element_wise_fn!(fn_tan,    do_tan,     tan  );
-element_wise_fn!(fn_asin,   do_asin,    asin );
-element_wise_fn!(fn_acos,   do_acos,    acos );
-element_wise_fn!(fn_atan,   do_atan,    atan );
+elementwise_fn!(fn_neg,    do_neg,     neg  );
+elementwise_fn!(fn_recip,  do_recip,   recip);
+elementwise_fn!(fn_abs,    do_abs,     abs  );
+elementwise_fn!(fn_sqrt,   do_sqrt,    sqrt );
+elementwise_fn!(fn_cbrt,   do_cbrt,    cbrt );
+elementwise_fn!(fn_exp,    do_exp,     exp  );
+elementwise_fn!(fn_floor,  do_floor,   floor);
+elementwise_fn!(fn_ceil,   do_ceil,    ceil );
+elementwise_fn!(fn_round,  do_round,   round);
+elementwise_fn!(fn_ln,     do_ln,      ln   );
+elementwise_fn!(fn_sin,    do_sin,     sin  );
+elementwise_fn!(fn_cos,    do_cos,     cos  );
+elementwise_fn!(fn_tan,    do_tan,     tan  );
+elementwise_fn!(fn_asin,   do_asin,    asin );
+elementwise_fn!(fn_acos,   do_acos,    acos );
+elementwise_fn!(fn_atan,   do_atan,    atan );
 
 pub fn fn_atan2(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn do_atan2(args: &[QExp]) -> QResult<QExp> {
@@ -1897,99 +1920,567 @@ pub fn fn_atan2(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return do_atan2(&env.eval_multi(args)?);
 }
 
-element_wise_fn!(fn_sinh,   do_sinh,    sinh );
-element_wise_fn!(fn_cosh,   do_cosh,    cosh );
-element_wise_fn!(fn_tanh,   do_tanh,    tanh );
-element_wise_fn!(fn_asinh,  do_asinh,   asinh);
-element_wise_fn!(fn_acosh,  do_acosh,   acosh);
-element_wise_fn!(fn_atanh,  do_atanh,   atanh);
-element_wise_fn!(fn_arg,    do_arg,     arg  );
-element_wise_fn!(fn_cis,    do_cis,     cis  );
-element_wise_fn!(fn_conj,   do_conj,    conj );
-element_wise_fn!(fn_real,   do_real,    real );
-element_wise_fn!(fn_imag,   do_imag,    imag );
+elementwise_fn!(fn_sinh,   do_sinh,    sinh );
+elementwise_fn!(fn_cosh,   do_cosh,    cosh );
+elementwise_fn!(fn_tanh,   do_tanh,    tanh );
+elementwise_fn!(fn_asinh,  do_asinh,   asinh);
+elementwise_fn!(fn_acosh,  do_acosh,   acosh);
+elementwise_fn!(fn_atanh,  do_atanh,   atanh);
+elementwise_fn!(fn_arg,    do_arg,     arg  );
+elementwise_fn!(fn_cis,    do_cis,     cis  );
+elementwise_fn!(fn_conj,   do_conj,    conj );
+elementwise_fn!(fn_real,   do_real,    real );
+elementwise_fn!(fn_imag,   do_imag,    imag );
 
 /*
  * parameterized element-wise math
  */
 
-pub fn fn_mod(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
-    if args.len() != 2 {
-        return Err(qerr!("mod must have exactly two arguments"));
+macro_rules! param_elementwise_fn(
+    (
+        $name:ident,
+        $err_prepend:literal,
+        $elem_arg:literal,
+        $param_arg:literal,
+        $method:ident,
+        $min_type:expr,
+        $max_type:expr
+    ) => {
+        pub fn $name(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+            if args.len() != 2 {
+                return Err(
+                    qerr_fmt!("expected two arguments but got {}", args.len())
+                    .prepend_source($err_prepend)
+                );
+            }
+            let (elem, elem_ty): (QExp, QExpType)
+                = match env.eval(args.get($elem_arg).unwrap())? {
+                    qbool!(b) => Ok((qbool!(b), qbool!())),
+                    qint!(i) => Ok((qint!(i), qint!())),
+                    qfloat!(f) => Ok((qfloat!(f), qfloat!())),
+                    qcomplex!(c) => Ok((qcomplex!(c), qcomplex!())),
+                    qlist!(l) => {
+                        let ty: QExpType
+                            = l.iter().map(|qk| qk.exp_type()).max()
+                            .ok_or(
+                                qerr!("expected non-empty list")
+                                .prepend_source($err_prepend)
+                            )?;
+                        Ok((qlist!(l), ty))
+                    },
+                    _ => Err(
+                        qerr!("args must be numbers or lists of numbers")
+                        .prepend_source($err_prepend)
+                    ),
+                }?;
+            let (param, param_ty): (QExp, QExpType)
+                = match env.eval(args.get($param_arg).unwrap())? {
+                    qbool!(b) => Ok((qbool!(b), qbool!())),
+                    qint!(i) => Ok((qint!(i), qint!())),
+                    qfloat!(f) => Ok((qfloat!(f), qfloat!())),
+                    qcomplex!(c) => Ok((qcomplex!(c), qcomplex!())),
+                    qlist!(l) => {
+                        let ty: QExpType
+                            = l.iter().map(|qk| qk.exp_type()).max()
+                            .ok_or(
+                                qerr!("expected non-empty list")
+                                .prepend_source($err_prepend)
+                            )?;
+                        Ok((qlist!(l), ty))
+                    },
+                    _ => Err(
+                        qerr!("args must be numbers or lists of numbers")
+                        .prepend_source($err_prepend)
+                    ),
+                }?;
+            let ty: QExpType = cmp::max(elem_ty, param_ty);
+            if ty < $min_type || ty > $max_type {
+                return Err(
+                    qerr_fmt!("cannot operate on type {}", ty)
+                    .prepend_source($err_prepend)
+                );
+            }
+            return match (elem, param) {
+                (qlist!(e), qlist!(p)) => {
+                    if e.len() != p.len() {
+                        return Err(
+                            qerr!("lists must be equal length")
+                            .prepend_source($err_prepend)
+                        );
+                    }
+                    let ret: Vec<QExp>
+                        = e.iter().zip(p.iter())
+                        .map(|(e, p)| e.$method(p))
+                        .collect::<QResult<Vec<QExp>>>()?;
+                    Ok(qlist!(ret))
+                },
+                (qlist!(e), p) => {
+                    let ret: Vec<QExp>
+                        = e.iter()
+                        .map(|e| e.$method(&p))
+                        .collect::<QResult<Vec<QExp>>>()?;
+                    Ok(qlist!(ret))
+                },
+                (e, qlist!(p)) => {
+                    let ret: Vec<QExp>
+                        = p.iter()
+                        .map(|p| e.$method(p))
+                        .collect::<QResult<Vec<QExp>>>()?;
+                    Ok(qlist!(ret))
+                },
+                (e, p) => Ok(e.$method(&p)?),
+            };
+        }
     }
-    let mut M: QExp = env.eval(args.get(0).unwrap())?;
-    let (nums, mut ty): (QExp, QExpType)
-        = match env.eval(args.get(1).unwrap())? {
-            qbool!(b) => Ok((qbool!(b), qbool!())),
-            qint!(i) => Ok((qint!(i), qint!())),
-            qfloat!(f) => Ok((qfloat!(f), qfloat!())),
-            qlist!(l) => {
-                convert_numbers_sametype(&l)
-                    .map(|(n, t)| (qlist!(n), t))
-                    .map_err(|e| e.prepend_source("mod"))
-            },
-            _ => Err(qerr!(
-                "mod: second argument must be a number or a list of numbers"
-            )),
-        }?;
-    ty = cmp::max(M.exp_type(), ty);
-    if ty > qfloat!() {
-        return Err(qerr!(
-            "mod: cannot modulo with complex or non-numerical values"));
-    }
-    M = convert_type_num(&M, ty)
-        .map_err(|e| e.prepend_source("mod"))?;
-    return match &nums {
-        qbool!(_) | qint!(_) | qfloat!(_) => {
-            convert_type_num(&nums, ty)?.modulo(&M)
-                .map_err(|e| e.prepend_source("mod"))
-        },
-        qlist!(l) => {
-            Ok(qlist!(
-                l.iter()
-                .map(|qk| convert_type_num(qk, ty))
-                .collect::<QResult<Vec<QExp>>>()
-                .map_err(|e| e.prepend_source("mod"))?
-                .iter()
-                .map(|qk| qk.modulo(&M))
-                .collect::<QResult<Vec<QExp>>>()
-                .map_err(|e| e.prepend_source("mod"))?
-            ))
-        },
-        _ => Err(qerr!("unexpected state")),
-    };
-}
+);
 
-// pub fn eval_log(&mut self, args: &[QExp]) -> QResult<QExp>;
-// pub fn eval_pow(&mut self, args: &[QExp]) -> QResult<QExp>;
+param_elementwise_fn!(fn_mod,  "mod",  0,  1,  modulo, qint!(),    qfloat!()  );
+param_elementwise_fn!(fn_log,  "log",  1,  0,  log,    qint!(),    qcomplex!());
+param_elementwise_fn!(fn_pow,  "pow",  0,  1,  pow,    qint!(),    qcomplex!());
 
 /*
  * list -> list math
  */
 
-// pub fn eval_convolve(&mut self, args: &[QExp]) -> QResult<QExp>;
-// pub fn eval_histogram(&mut self, args: &[QExp]) -> QResult<QExp>;
-// pub fn eval_histogram_prob(&mut self, args: &[QExp]) -> QResult<QExp>;
+pub fn fn_convolve(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    if args.len() != 2 {
+        return Err(qerr_fmt!(
+            "convolve: expected 2 args but got {}", args.len()));
+    }
+    let (l1, l1_type): (Vec<QExp>, QExpType)
+        = match env.eval(args.get(0).unwrap())? {
+            qlist!(l) => convert_numbers_sametype(&l),
+            _ => Err(qerr!("convolve: args must be lists of numbers")),
+        }?;
+    let N: usize = l1.len();
+    let (l2, l2_type): (Vec<QExp>, QExpType)
+        = match env.eval(args.get(1).unwrap())? {
+            qlist!(l) => convert_numbers_sametype(&l),
+            _ => Err(qerr!("convolve: args must be lists of numbers")),
+        }?;
+    let M: usize = l2.len();
+    let mut ret: Vec<QExp> = Vec::new();
+    let ret_type: QExpType = cmp::max(l1_type, l2_type);
+    let mut acc: QExp = QExp::zero(ret_type)?;
+    let K: usize = cmp::max(N, M);
+    for t in 0..l1.len() + l2.len() - 1 {
+        for x in 0..K {
+            if let Some(xp) = t.checked_sub(x) {
+                if let (Some(q1), Some(q2)) = (l1.get(x), l2.get(xp)) {
+                    acc = acc.add(&q1.mul(q2)?)?;
+                }
+            }
+        }
+        ret.push(mem::replace(&mut acc, QExp::zero(ret_type)?));
+    }
+    return Ok(qlist!(ret));
+}
+
+pub fn fn_histogram(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    fn index_of(vals: &[QExp], item: &QExp) -> Option<usize> {
+        for (k, it) in vals.iter().enumerate() {
+            if it == item {
+                return Some(k);
+            }
+        }
+        return None;
+    }
+
+    if args.len() != 1 {
+        return Err(qerr_fmt!(
+            "histogram: expected 1 arg but got {}", args.len()));
+    }
+    let data: Vec<QExp>
+        = match env.eval(args.get(0).unwrap())? {
+            qlist!(l) => Ok(l),
+            _ => Err(qerr!("histogram: arg must be a list")),
+        }?;
+    let mut vals: Vec<QExp> = Vec::new();
+    let mut counts: Vec<usize> = Vec::new();
+    for item in data.iter() {
+        if let Some(k) = index_of(&vals, item) {
+            counts[k] += 1;
+        } else {
+            vals.push(item.clone());
+            counts.push(1);
+        }
+    }
+    return Ok(qlist!(
+        vals.into_iter().zip(counts.into_iter())
+        .map(|(v, c)| qlist!(vec![v, qint!(c as i64)]))
+        .collect()
+    ));
+}
+
+pub fn fn_histogram_prob(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    fn index_of(vals: &[QExp], item: &QExp) -> Option<usize> {
+        for (k, it) in vals.iter().enumerate() {
+            if it == item {
+                return Some(k);
+            }
+        }
+        return None;
+    }
+
+    if args.len() != 1 {
+        return Err(qerr_fmt!(
+            "histogram-prob: expected 1 arg but got {}", args.len()));
+    }
+    let data: Vec<QExp>
+        = match env.eval(args.get(0).unwrap())? {
+            qlist!(l) => Ok(l),
+            _ => Err(qerr!("histogram-prob: arg must be a list")),
+        }?;
+    let mut vals: Vec<QExp> = Vec::new();
+    let mut counts: Vec<usize> = Vec::new();
+    for item in data.iter() {
+        if let Some(k) = index_of(&vals, item) {
+            counts[k] += 1;
+        } else {
+            vals.push(item.clone());
+            counts.push(1);
+        }
+    }
+    let N: f64 = data.len() as f64;
+    return Ok(qlist!(
+        vals.into_iter().zip(counts.into_iter())
+        .map(|(v, c)| qlist!(vec![v, qfloat!(c as f64 / N)]))
+        .collect()
+    ));
+}
+
+pub fn fn_covariance(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    fn mean_qexp<'a, I>(vals: I, ret_type: QExpType) -> QResult<QExp>
+    where I: IntoIterator<Item = &'a QExp>
+    {
+        let mut N: i64 = 0;
+        let mut acc = QExp::zero(ret_type)?;
+        for qk in vals.into_iter() {
+            acc = acc.add(qk)?;
+            N += 1;
+        }
+        return acc.div(&qint!(N));
+    }
+
+    if args.len() != 1 {
+        return Err(qerr_fmt!(
+            "covariance: expected 1 arg but got {}", args.len()));
+    }
+    let data: Vec<QExp> = match env.eval(args.get(0).unwrap())? {
+        qlist!(l) => Ok(l),
+        _ => Err(qerr!("covariance: arg must be a list of n-dimensional data")),
+    }?;
+    let N: usize = match data.first() {
+        Some(qlist!(l)) => Ok(l.len()),
+        Some(_)
+            => Err(qerr!("covariance: items in arg must be lists of numbers")),
+        None => Err(qerr!("covariance: expected non-empty data set")),
+    }?;
+    let mut series: Vec<Vec<QExp>> = (0..N).map(|_| Vec::new()).collect();
+    let mut ret_type: QExpType = qint!();
+    for X in data.into_iter() {
+        if let qlist!(l) = X {
+            if l.len() == N {
+                l.into_iter().zip(series.iter_mut())
+                    .map(|(qk, ser)| {
+                        ret_type = cmp::max(ret_type, qk.exp_type());
+                        if ret_type <= qcomplex!() {
+                            ser.push(qk);
+                            Ok(())
+                        } else {
+                            Err(qerr!(
+                                "covariance: encountered non-numerical value."
+                            ))
+                        }
+                    })
+                    .collect::<QResult<Vec<()>>>()?;
+            } else {
+                return Err(qerr!(
+                    "covariance: all entries in the data set must be of the \
+                    same dimension"
+                ));
+            }
+        } else {
+            return Err(qerr!(
+                "covariance: all entries in the data set must be lists of \
+                numbers"
+            ));
+        }
+    }
+    let mut X: &Vec<QExp>;
+    let mut Y: Vec<QExp>;
+    let mut XY: Vec<QExp>;
+    let mut E_X: QExp;
+    let mut E_Y: QExp;
+    let mut E_XY: QExp;
+    let mut covar: Vec<Vec<QExp>> = Vec::new();
+    let mut row: Vec<QExp> = Vec::new();
+    for i in 0..N {
+        for j in 0..N {
+            X = series.get(i).unwrap();
+            Y = series.get(j).unwrap()
+                .iter()
+                .map(|yk| yk.conj())
+                .collect::<QResult<Vec<QExp>>>()?;
+            XY = X.iter().zip(Y.iter())
+                .map(|(xk, yk)| xk.mul(yk))
+                .collect::<QResult<Vec<QExp>>>()?;
+            E_X = mean_qexp(X, ret_type)?;
+            E_Y = mean_qexp(&Y, ret_type)?;
+            E_XY = mean_qexp(&XY, ret_type)?;
+            row.push(E_XY.sub(&E_X.mul(&E_Y)?)?);
+        }
+        covar.push(mem::take(&mut row));
+    }
+    return Ok(qlist!(covar.into_iter().map(|ci| qlist!(ci)).collect()));
+}
+
+pub fn fn_correlation(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    fn mean_qexp<'a, I>(vals: I, ret_type: QExpType) -> QResult<QExp>
+    where I: IntoIterator<Item = &'a QExp>
+    {
+        let mut N: i64 = 0;
+        let mut acc = QExp::zero(ret_type)?;
+        for qk in vals.into_iter() {
+            acc = acc.add(qk)?;
+            N += 1;
+        }
+        return acc.div(&qint!(N));
+    }
+
+    fn stddev_qexp<'a, I>(vals: I, mean: &QExp, ret_type: QExpType)
+        -> QResult<QExp>
+    where I: IntoIterator<Item = &'a QExp>
+    {
+        let mut N: i64 = 0;
+        let mut acc = QExp::zero(ret_type)?;
+        for qk in vals.into_iter() {
+            acc = acc.add(&qk.sub(mean)?.abs()?.pow(&qint!(2))?)?;
+            N += 1;
+        }
+        return acc.div(&qint!(N))?.sqrt();
+    }
+
+    if args.len() != 1 {
+        return Err(qerr_fmt!(
+            "correlation: expected 1 arg but got {}", args.len()));
+    }
+    let data: Vec<QExp> = match env.eval(args.get(0).unwrap())? {
+        qlist!(l) => Ok(l),
+        _ => Err(qerr!(
+            "correlation: arg must be a list of n-dimensional data")),
+    }?;
+    let N: usize = match data.first() {
+        Some(qlist!(l)) => Ok(l.len()),
+        Some(_)
+            => Err(qerr!("correlation: items in arg must be lists of numbers")),
+        None => Err(qerr!("correlation: expected non-empty data set")),
+    }?;
+    let mut series: Vec<Vec<QExp>> = (0..N).map(|_| Vec::new()).collect();
+    let mut ret_type: QExpType = qint!();
+    for X in data.into_iter() {
+        if let qlist!(l) = X {
+            if l.len() == N {
+                l.into_iter().zip(series.iter_mut())
+                    .map(|(qk, ser)| {
+                        ret_type = cmp::max(ret_type, qk.exp_type());
+                        if ret_type <= qcomplex!() {
+                            ser.push(qk);
+                            Ok(())
+                        } else {
+                            Err(qerr!(
+                                "correlation: encountered non-numerical value."
+                            ))
+                        }
+                    })
+                    .collect::<QResult<Vec<()>>>()?;
+            } else {
+                return Err(qerr!(
+                    "correlation: all entries in the data set must be of the \
+                    same dimension"
+                ));
+            }
+        } else {
+            return Err(qerr!(
+                "correlation: all entries in the data set must be lists of \
+                numbers"
+            ));
+        }
+    }
+    let mut X: &Vec<QExp>;
+    let mut Y: Vec<QExp>;
+    let mut XY: Vec<QExp>;
+    let mut E_X: QExp;
+    let mut E_Y: QExp;
+    let mut E_XY: QExp;
+    let mut sig_X: QExp;
+    let mut sig_Y: QExp;
+    let mut corr: Vec<Vec<QExp>> = Vec::new();
+    let mut row: Vec<QExp> = Vec::new();
+    for i in 0..N {
+        for j in 0..N {
+            if i == j {
+                row.push(QExp::one(ret_type)?);
+                continue;
+            }
+            X = series.get(i).unwrap();
+            Y = series.get(j).unwrap()
+                .iter()
+                .map(|yk| yk.conj())
+                .collect::<QResult<Vec<QExp>>>()?;
+            XY = X.iter().zip(Y.iter())
+                .map(|(xk, yk)| xk.mul(yk))
+                .collect::<QResult<Vec<QExp>>>()?;
+            E_X = mean_qexp(X, ret_type)?;
+            E_Y = mean_qexp(&Y, ret_type)?;
+            E_XY = mean_qexp(&XY, ret_type)?;
+            sig_X = stddev_qexp(X, &E_X, ret_type)?;
+            sig_Y = stddev_qexp(&Y, &E_Y, ret_type)?;
+            row.push(
+                E_XY.sub(&E_X.mul(&E_Y)?)?
+                    .div(&sig_X.mul(&sig_Y)?)?
+            );
+        }
+        corr.push(mem::take(&mut row));
+    }
+    return Ok(qlist!(corr.into_iter().map(|ci| qlist!(ci)).collect()));
+}
+
 // pub fn eval_fft(&mut self, args: &[QExp]) -> QResult<QExp>;
 // pub fn eval_ifft(&mut self, args: &[QExp]) -> QResult<QExp>;
-// pub fn eval_findpeaks(&mut self, args: &[QExp]) -> QResult<QExp>;
-// pub fn eval_covariance(&mut self, args: &[QExp]) -> QResult<QExp>;
-// pub fn eval_correlation(&mut self, args: &[QExp]) -> QResult<QExp>;
 
 /*
- * list -> value math
+ * many/list -> value math
  */
 
-// pub fn eval_mean(&mut self, args: &[QExp]) -> QResult<QExp>;
-// pub fn eval_variance(&mut self, args: &[QExp]) -> QResult<QExp>;
-// pub fn eval_stddev(&mut self, args: &[QExp]) -> QResult<QExp>;
+pub fn fn_mean(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    fn do_mean(args: &[QExp]) -> QResult<QExp> {
+        if args.len() == 1 {
+            if let Some(qlist!(l)) = args.first() {
+                return do_mean(l);
+            }
+        }
+        let (nums, ret_type): (Vec<QExp>, QExpType)
+            = convert_numbers_sametype(args)?;
+        let N: usize = nums.len();
+        let mut acc = QExp::zero(ret_type)?;
+        for x in nums.into_iter() {
+            acc = acc.add(&x)?;
+        }
+        return acc.div(&qint!(N as i64));
+    }
+    return do_mean(&env.eval_multi(args)?);
+}
+
+pub fn fn_variance(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    fn do_variance(args: &[QExp]) -> QResult<QExp> {
+        if args.len() == 1 {
+            if let Some(qlist!(l)) = args.first() {
+                return do_variance(l);
+            }
+        }
+        let (nums, ret_type): (Vec<QExp>, QExpType)
+            = convert_numbers_sametype(args)?;
+        let N: i64 = nums.len() as i64;
+        // mean
+        let mut acc = QExp::zero(ret_type)?;
+        for x in nums.iter() {
+            acc = acc.add(x)?;
+        }
+        let mean: QExp = acc.div(&qint!(N))?;
+        // var
+        let mut acc = QExp::zero(ret_type)?;
+        for x in nums.iter() {
+            acc = acc.add(&x.sub(&mean)?.abs()?.pow(&qint!(2))?)?;
+        }
+        return acc.div(&qint!(N));
+    }
+    return do_variance(&env.eval_multi(args)?);
+}
+
+pub fn fn_stddev(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    fn do_stddev(args: &[QExp]) -> QResult<QExp> {
+        if args.len() == 1 {
+            if let Some(qlist!(l)) = args.first() {
+                return do_stddev(l);
+            }
+        }
+        let (nums, ret_type): (Vec<QExp>, QExpType)
+            = convert_numbers_sametype(args)?;
+        let N: i64 = nums.len() as i64;
+        // mean
+        let mut acc = QExp::zero(ret_type)?;
+        for x in nums.iter() {
+            acc = acc.add(x)?;
+        }
+        let mean: QExp = acc.div(&qint!(N))?;
+        // var
+        let mut acc = QExp::zero(ret_type)?;
+        for x in nums.iter() {
+            acc = acc.add(&x.sub(&mean)?.abs()?.pow(&qint!(2))?)?;
+        }
+        let var: QExp = acc.div(&qint!(N))?;
+        return var.sqrt();
+    }
+    return do_stddev(&env.eval_multi(args)?);
+}
 
 /*
  * parameterized list -> value math
  */
 
-// pub fn eval_pnorm(&mut self, args: &[QExp]) -> QResult<QExp>;
-// pub fn eval_moment(&mut self, args: &[QExp]) -> QResult<QExp>;
+pub fn fn_pnorm(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    if args.len() != 2 {
+        return Err(qerr_fmt!(
+            "pnorm: expected 2 args but got {}", args.len()));
+    }
+    let parg: QExp = env.eval(args.get(0).unwrap())?;
+    let p: QExp
+        = convert_type_num(&parg, cmp::max(parg.exp_type(), qint!()))
+        .map_err(|e| e.prepend_source("pnorm"))?;
+    if p.is_zero() {
+        return Err(qerr!("pnorm: p value cannot be zero"));
+    }
+    let (nums, nums_type): (Vec<QExp>, QExpType)
+        = match env.eval(args.get(1).unwrap())? {
+            qlist!(l) => convert_numbers_sametype(&l),
+            _ => Err(qerr!("second arg must be a list of numbers")),
+        }
+        .map_err(|e| e.prepend_source("pnorm"))?;
+    let mut acc = QExp::zero(nums_type)?;
+    for x in nums.iter() {
+        acc = acc.add(&x.abs()?.pow(&p)?)?;
+    }
+    let pnorm: QExp = acc.pow(&p.recip()?)?;
+    return if let qcomplex!(c) = pnorm {
+        Ok(qfloat!(c.re))
+    } else {
+        Ok(pnorm)
+    }
+}
+
+pub fn fn_moment(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    if args.len() != 2 {
+        return Err(qerr_fmt!(
+            "moment: expected 2 args but got {}", args.len()));
+    }
+    let narg: QExp = env.eval(args.get(0).unwrap())?;
+    let n: QExp
+        = convert_type_num(&narg, cmp::max(narg.exp_type(), qint!()))
+        .map_err(|e| e.prepend_source("moment"))?;
+    let (nums, nums_type): (Vec<QExp>, QExpType)
+        = match env.eval(args.get(1).unwrap())? {
+            qlist!(l) => convert_numbers_sametype(&l),
+            _ => Err(qerr!("second arg must be a list of numbers")),
+        }
+        .map_err(|e| e.prepend_source("moment"))?;
+    let N: usize = nums.len();
+    let mut acc = QExp::zero(nums_type)?;
+    for x in nums.iter() {
+        acc = acc.add(&x.pow(&n)?)?;
+    }
+    return acc.div(&qint!(N as i64));
+}
 
 /*
  * special-arg math

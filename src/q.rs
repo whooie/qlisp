@@ -33,7 +33,7 @@ fn main() {
     if let Some(command) = run.command {
         let mut env = QEnv::default();
         match env.parse_eval(command) {
-            Ok(_) => { () },
+            Ok(_) => { },
             Err(e) => { println!("Error: {}", e.message()); },
         }
     } else if let Some(infile) = run.file {
@@ -47,7 +47,7 @@ fn main() {
         };
         let mut command = String::new();
         match file.read_to_string(&mut command) {
-            Ok(_) => { () },
+            Ok(_) => { },
             Err(e) => {
                 println!("Error: cannot read file {}: {}", display, e);
                 exit(2);
@@ -55,7 +55,7 @@ fn main() {
         };
         let mut env = QEnv::default();
         match env.parse_eval(command) {
-            Ok(_) => { () },
+            Ok(_) => { },
             Err(e) => { println!("Error: {}", e.message()); },
         }
     } else {
