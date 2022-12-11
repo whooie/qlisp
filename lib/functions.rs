@@ -151,24 +151,42 @@ pub fn fn_fn(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         };
     }
 
+    fn verify_arg_pattern(exps: &[QExp], symbols: &mut Vec<String>)
+        -> QResult<Vec<QExp>>
+    {
+        let mut pattern: Vec<QExp> = Vec::new();
+        for qk in exps.iter() {
+            match qk {
+                qsymbol!(s) => {
+                    symbols.push(s.clone());
+                    pattern.push(qsymbol!(s.clone()));
+                },
+                qlist!(l) => {
+                    pattern.push(qlist!(verify_arg_pattern(l, symbols)?));
+                },
+                _ => {
+                    return Err(qerr!(
+                        "fn: invalid arg pattern: must be a list of symbols or \
+                        nested lists of symbols"
+                    ));
+                },
+            }
+        }
+        return Ok(pattern);
+    }
+
     if args.len() != 2 {
         return Err(qerr_fmt!(
             "fn: expected 2 args but got {}", args.len()));
     }
-    let (params_exp, protected_symbols): (&QExp, Vec<String>)
+    let mut protected_symbols: Vec<String> = Vec::new();
+    let arg_pattern: Vec<QExp>
         = match args.get(0).unwrap() {
-            qlist!(l) => {
-                let arg_names: Vec<String>
-                    = l.iter()
-                        .map(|qk| match qk {
-                            qsymbol!(s) => Ok(s.clone()),
-                            _ => Err(qerr!(
-                                "fn: function args must be a list of symbols")),
-                        })
-                        .collect::<QResult<Vec<String>>>()?;
-                Ok((args.get(0).unwrap(), arg_names))
-            },
-            _ => Err(qerr!("fn: function args must be a list of symbols")),
+            qlist!(l) => verify_arg_pattern(l, &mut protected_symbols),
+            _ => Err(qerr!(
+                "fn: invalid arg pattern: must be a list of symbols or nested \
+                lists of symbols"
+            )),
         }?;
     let body_exp: QExp
         = subs_from_env(
@@ -178,7 +196,7 @@ pub fn fn_fn(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         );
     return Ok(
         qlambda!(QLambda {
-            params_exp: Rc::new(params_exp.clone()),
+            arg_pattern: Rc::new(arg_pattern),
             body_exp: Rc::new(body_exp),
         })
     );
@@ -200,24 +218,9 @@ pub fn fn_defn(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         },
         _ => Err(qerr!("defn: first arg must be a symbol")),
     }?;
-    let params_exp: &QExp = match args.get(1).unwrap() {
-        qlist!(l) => {
-            if l.iter().any(|qk| qk.exp_type() != qsymbol!()) {
-                Err(qerr!("defn: function args must be a list of symbols"))
-            } else {
-                Ok(args.get(1).unwrap())
-            }
-        },
-        _ => Err(qerr!("defn: function args must be a list of symbols")),
-    }?;
-    let body_exp: &QExp
-        = args.get(2).ok_or_else(|| qerr!("defn: missing function body"))?;
-    let function = QLambda {
-        params_exp: Rc::new(params_exp.clone()),
-        body_exp: Rc::new(body_exp.clone()),
-    };
-    env.insert(symbol, qlambda!(function.clone()));
-    return Ok(qlambda!(function));
+    let lambda: QExp = fn_fn(env, &args[1..])?;
+    env.insert(symbol, lambda.clone());
+    return Ok(lambda)
 }
 
 pub fn fn_if(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {

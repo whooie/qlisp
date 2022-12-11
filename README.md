@@ -31,7 +31,7 @@ See [qlisp.vim][qlisp.vim] for basic syntax highlighting in Vim.
 - [x] add a string type
 - [x] add a CLI and read executable expressions from files
 - [x] add various math/statistics functions
-- [ ] add pattern-matching args to lambdas
+- [x] add pattern-matching args to lambdas
 - [ ] add hash maps
 - [ ] add (nd)arrays
 - [ ] add file I/O with hash map serialization to `json`, `toml`, `yaml`, ...

@@ -1093,7 +1093,7 @@ impl fmt::Debug for QExp {
             qsymbol!(x) => write!(f, "symbol({:?})", x),
             qfunc!(name, _) => write!(f, "func({} {{ ... }})", name),
             qlambda!(x)
-                => write!(f, "lambda({:?} {{ ... }})", x.params_exp.as_ref()),
+                => write!(f, "lambda({:?} {{ ... }})", x.arg_pattern.as_ref()),
         }
     }
 }
@@ -1124,55 +1124,75 @@ impl fmt::Display for QExp {
             qstr!(x) => x.fmt(f),
             qsymbol!(x) => write!(f, "{}", x),
             qfunc!(name, _) => write!(f, "func <{}> {{ ... }}", name),
-            qlambda!(x)
-                => write!(f, "lambda {} {{ ... }}", x.params_exp.as_ref()),
+            qlambda!(x) => {
+                let n: usize = x.arg_pattern.as_ref().len();
+                write!(f, "lambda (")?;
+                for (k, sk) in x.arg_pattern.as_ref().iter().enumerate() {
+                    sk.fmt(f)?;
+                    if k < n - 1 { write!(f, ", ")?; }
+                }
+                write!(f, ") {{ ... }}")
+            },
         };
     }
 }
 
 #[derive(Clone)]
 pub struct QLambda {
-    pub params_exp: Rc<QExp>,
+    pub arg_pattern: Rc<Vec<QExp>>,
     pub body_exp: Rc<QExp>,
 }
 
 impl QLambda {
-    pub fn get_params_exp(&self) -> &Rc<QExp> { &self.params_exp }
+    pub fn get_arg_pattern(&self) -> &Rc<Vec<QExp>> { &self.arg_pattern }
 
     pub fn get_body_exp(&self) -> &Rc<QExp> { &self.body_exp }
-
-    pub fn parse_symbols(form: Rc<QExp>) -> QResult<Vec<String>> {
-        let list: Vec<QExp> = match form.as_ref() {
-            qlist!(s) => Ok(s.clone()),
-            _ => Err(qerr!("expected args form to be a list")),
-        }?;
-        return list.iter()
-            .map(|x| {
-                match x {
-                    qsymbol!(s) => Ok(s.clone()),
-                    _ => Err(qerr!("arguments must be a list of symbols")),
-                }
-            })
-            .collect();
-    }
 
     pub fn env<'a>(&self, args: &[QExp], outer_env: &'a mut QEnv)
         -> QResult<QEnv<'a>>
     {
-        let symbols: Vec<String>
-            = Self::parse_symbols(self.params_exp.clone())?;
-        if symbols.len() != args.len() {
-            return Err(qerr_fmt!(
-                "expected {} arguments but got {}",
-                symbols.len(),
-                args.len()
-            ));
+        fn let_assignment(
+            lhs: &[QExp],
+            rhs: &[QExp],
+            data: &mut HashMap<String, QExp>
+        ) -> QResult<()>
+        {
+            for (lk, rk) in lhs.iter().zip(rhs) {
+                match (lk, rk) {
+                    (qsymbol!(s), q) => {
+                        data.insert(s.clone(), q.clone());
+                    },
+                    (qlist!(l), qlist!(r)) => {
+                        let_assignment(l, r, data)?;
+                    },
+                    _ => {
+                        return Err(qerr!(
+                            "fn eval: could not match values to arg pattern"
+                        ))
+                    },
+                }
+            }
+            return Ok(());
         }
+
         let values: Vec<QExp> = outer_env.eval_multi(args)?;
         let mut data: HashMap<String, QExp> = HashMap::new();
-        for (k, v) in symbols.into_iter().zip(values.into_iter()) {
-            data.insert(k, v);
-        }
+        let_assignment(self.arg_pattern.as_ref(), &values, &mut data)?;
+
+        // let symbols: Vec<String>
+        //     = Self::parse_symbols(self.params_exp.clone())?;
+        // if symbols.len() != args.len() {
+        //     return Err(qerr_fmt!(
+        //         "expected {} arguments but got {}",
+        //         symbols.len(),
+        //         args.len()
+        //     ));
+        // }
+        // let values: Vec<QExp> = outer_env.eval_multi(args)?;
+        // let mut data: HashMap<String, QExp> = HashMap::new();
+        // for (k, v) in symbols.into_iter().zip(values.into_iter()) {
+        //     data.insert(k, v);
+        // }
         return Ok(QEnv { data, outer: Some(outer_env) });
     }
 
