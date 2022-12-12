@@ -2111,7 +2111,7 @@ q>> (moment 2 (1 6 3 5 7 9 0 4 2 6 4 3 7)) ; evaluates to 25.46153846153846
 static FUNCTION_SYMBOLS: phf::Map<&'static str, &'static str> = phf_map! {
     // special functions -- keyword-like
     ":="    => "def",
-    ":=*"   => "let",
+    "*:="   => "let",
     "@:"    => "fn",
     "@:="   => "defn",
     "=>"    => "if",
