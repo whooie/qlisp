@@ -9,10 +9,12 @@ use crate::{
     qstr,
     qsymbol,
     lang::{
+        PROTECTED,
         QResult,
         QErr,
         QExp,
         QEnv,
+        QEnvEntry,
         tokenize,
         parse,
     },
@@ -104,7 +106,6 @@ q>> (factorial 5) ; evaluates to 120
 "
 Conditional expression: Evaluates one of two expressions based on the true/false
 value of a test expression.
-Alias: `=>`
 
 Expected form:
 (if <test expression> <true expression> <false expression>)
@@ -114,6 +115,133 @@ q>> (def a true)
 q>> (if a 1 0) ; evaluates to 1
 q>> (def b false)
 q>> (if b 1 0) ; evaluates to 0
+",
+        ),
+
+        "module" => (
+            "Construct a module and assign it to a symbol.",
+"
+Construct a module and assign it to a symbol in the local environment. Evaluated
+data is returned as a list ordered by evaluation.
+
+Expected form:
+(module <symbol> (<expressions...>))
+
+Example:
+q>> ; use a namespace (module) to hold a set of constants and functions
+q>> ; elements of a module cannot be changed from the outside
+q>> (module my-module ((def a 10) (defn add-to-a (b) (+ a b))))
+q>> my-module::a ; evaluates to 10
+q>> ; functions inside a module are unaffected by outer environments
+q>> (my-module::add-to-a 10) ; evaluates to 20
+q>> (def a 15)
+q>> (my-module::add-to-a 10) ; evaluates to 20
+",
+        ),
+
+        "use" => (
+            "Load an external file as a module.",
+"
+Load an external file as a module and assign it to a symbol in the local
+environment. External files are specified as a symbolic path, where each element
+in the path should correspond to a directory except for the final element, which
+should correspond to a file name. The final element should not have a file
+extension; instead the directory corresponding to the final parent in the path
+will be searched for files with stems equal to the final element and ending with
+'.qlisp', or '.qlsp'. All paths are treated as relative to the file being
+executed or the current working directory if the REPL is being used. Use 'super'
+in a path to specify a parent directory (equivalent to '..'). A symbol may be
+also be specified to store the module under; the default symbol is the final
+path element.
+
+Expected form:
+(use <path> [ symbol ])
+
+Example:
+q>> ; load ../mod1/mod2/child.qlisp and store it as child-mod
+q>> (use super::mod1::mod2::child child-mod)
+",
+        ),
+
+        "use-all" => (
+            "Load the contents of an external file.",
+"
+Load the contents of an external file as a module and bring all of its contents
+into the local environment.External files are specified as a symbolic path,
+where each element in the path should correspond to a directory except for the
+final element, which should correspond to a file name. The final element should
+not have a file extension; instead the directory corresponding to the final
+parent in the path will be searched for files with stems equal to the final
+element and ending with '.qlisp', or '.qlsp'. All paths are treated as relative
+to the file being executed or the current working directory if the REPL is being
+used. Use 'super' in a path to specify a parent directory (equivalent to '..').
+A symbol may be also be specified to store the module under; the default symbol
+is the final path element.
+Alias: `use*`
+
+Expected form:
+(use-all <path>)
+
+Example:
+q>> ; load the contents of ../mod1/mod2/child.qlisp into the local environment
+q>> (use-all super::mod1::mod2::child)
+",
+        ),
+
+        "interact" => (
+            "Pause execution and launch the REPL.",
+"
+Immedately pause execution of a program and launch the REPL. Execution will
+continue when the REPL is exited.
+
+Expected form:
+(interact)
+
+Example:
+q>> ; suppose this is in the middle of a file being executed
+q>> (def a 10)
+q>> (defn foo (b) (+ a b))
+q>> ; launch the REPL here
+q>> ; the environment will hold whatever definitions have been made up to this
+q>> ; point in the program
+q>> (interact)
+q>> ; continue doing other things after the REPL exits.
+",
+        ),
+
+        "isdef" => (
+            "Check whether a symbol is defined.",
+"
+Check whether a set of definitions is present. Returns `true` if all symbols
+passed as arguments exist with a value, `false` otherwise.
+Alias: `?:=`
+
+Expected form:
+(isdef <symbols>...)
+
+Example:
+q>> (def a 10)
+q>> (def foo (b) (+ a b))
+q>> (module my-module ((def c 15)))
+q>> (isdef a foo my-module::c) ; evaluates to true
+",
+        ),
+
+        "del" => (
+            "Remove a definition.",
+"
+Remove a definition from the local environment. Any value including modules may
+be removed, but only values will be returned.
+Alias: `!-`
+
+Expected form:
+(del <symbols>...)
+
+Example:
+q>> (def a 10)
+q>> a ; evaluates to 10
+q>> (del a) ; evaluates to 10
+q>> a ; causes an error
 ",
         ),
 
@@ -1350,7 +1478,7 @@ elements drawn from each argument. The length of the returned list is limited to
 that of the shortest argument. strs are unpacked into lists of one
 character-long strs. If only a single list is passed, operates on the contents
 of the list instead of the list itself.
-Alias: `::`
+Alias: `:~:`
 
 Expected form:
 (zip <lists or strs>...)
@@ -1941,7 +2069,7 @@ q>> (pow (1 2 3 4) (1 2 3 4)) ; evaluates to (1 4 27 256)
 Discrete-valued convolution operation between two lists of numbers. Returns
 values obtained from all points of non-zero overlap; the returned list contains
 N + M - 1 values, where N and M are the lengths of the two argument lists.
-Alias: `{*}`
+Alias: `<:>`
 
 Expected form:
 (convolve <list1> <list2>)
@@ -2025,7 +2153,6 @@ q>> (correlation ((1 2) (1 1) (2 5) (2 4))) ; evaluates to ((1 0.948) (0.948 1))
             "Mean of a data set.",
 "
 Finds the mean of a (scalar) data set.
-Alias: `{E}`
 
 Expected form:
 (mean <data>)
@@ -2087,7 +2214,6 @@ q>> (pnorm 1 (3 4)) ; evaluates to 7.0
             "N-th moment of a data set.",
 "
 Finds the N-th moment of a (scalar) data set for given N.
-Alias: `{En}`
 
 Expected form:
 (moment <N> <data>)
@@ -2105,6 +2231,42 @@ q>> (moment 2 (1 6 3 5 7 9 0 4 2 6 4 3 7)) ; evaluates to 25.46153846153846
  */
 
         // sample
+
+/*
+ * REPL-only
+ */
+
+        "vars" => (
+            "List all defined symbols in an environment.",
+"
+List all defined symbols as strings within the local environment or any loaded
+modules. REPL-only.
+
+Expected form:
+(vars [<modules>...])
+
+Example:
+q>> (vars) ; list all symbols in the local environment
+q>> (module my-module (...))
+q>> (vars my-module) ; list all symbols in my-module
+",
+        ),
+
+        "defs" => (
+            "List all non-default definitions in an environment.",
+"
+List all user-defined symbols as strings within the local environment or any
+loaded modules. REPL-only.
+
+Expected form:
+(defs [<modules>...])
+
+Example:
+q>> (defs) ; list all user-defined symbols in the local environment
+q>> (module my-module (...))
+q>> (defs my-module) ; list all user-defined symbols in my-module
+",
+        ),
 
     };
 
@@ -2282,6 +2444,10 @@ trait ReplEnv {
 
     fn repl_eval_help(&mut self, args: &[QExp]) -> QResult<QExp>;
 
+    fn repl_eval_vars(&mut self, args: &[QExp]) -> QResult<QExp>;
+
+    fn repl_eval_defs(&mut self, args: &[QExp]) -> QResult<QExp>;
+
     fn repl_func(&mut self, exp: &QExp, args: &[QExp])
         -> Option<QResult<ReplOut>>;
 }
@@ -2294,6 +2460,9 @@ impl<'a> ReplEnv for QEnv<'a> {
         "print",    "$-",
         "println",  "$_",
         "halt",     "!!",
+        "use",
+        "use-all",  "use*",
+        "interact",
     ];
 
     fn repl_eval(&mut self, exp: &QExp) -> QResult<ReplOut> {
@@ -2383,6 +2552,80 @@ Available topics:"
         return Ok(qbool!(true));
     }
 
+    fn repl_eval_vars(&mut self, args: &[QExp]) -> QResult<QExp> {
+        return if args.is_empty() {
+            Ok(qlist!(
+                self.symbols().into_iter().map(|s| qstr!(s)).collect()
+            ))
+        } else {
+            let res: Vec<QExp>
+                = args.iter()
+                .map(|qk| match qk {
+                    qsymbol!(s) => match self.get_ok(s) {
+                        Ok(QEnvEntry::Mod(m)) => Ok(m.symbols()),
+                        Ok(QEnvEntry::Exp(_))
+                            => Err(qerr!("vars: args must be loaded modules")),
+                        Err(e) => Err(e.prepend_source("vars")),
+                    },
+                    _ => Err(qerr!("vars: args must be symbols")),
+                })
+                .collect::<QResult<Vec<Vec<String>>>>()?
+                .into_iter()
+                .map(|ss| qlist!(ss.into_iter().map(|s| qstr!(s)).collect()))
+                .collect();
+            if res.len() == 1 {
+                Ok(res.into_iter().next().unwrap())
+            } else {
+                Ok(qlist!(res))
+            }
+        };
+    }
+
+    fn repl_eval_defs(&mut self, args: &[QExp]) -> QResult<QExp> {
+        return if args.is_empty() {
+            Ok(qlist!(
+                self.symbols()
+                    .into_iter()
+                    .filter_map(|s| {
+                        (!PROTECTED.contains(&s.as_ref()))
+                            .then_some(qstr!(s))
+                    })
+                    .collect()
+            ))
+        } else {
+            let res: Vec<QExp>
+                = args.iter()
+                .map(|qk| match qk {
+                    qsymbol!(s) => match self.get_ok(s) {
+                        Ok(QEnvEntry::Mod(m)) => {
+                            Ok(
+                                m.symbols()
+                                .into_iter()
+                                .filter_map(|s| {
+                                    (!PROTECTED.contains(&s.as_ref()))
+                                        .then_some(s)
+                                })
+                                .collect()
+                            )
+                        },
+                        Ok(QEnvEntry::Exp(_))
+                            => Err(qerr!("defs: args must be loaded modules")),
+                        Err(e) => Err(e.prepend_source("vars")),
+                    },
+                    _ => Err(qerr!("defs: args must be symbols")),
+                })
+                .collect::<QResult<Vec<Vec<String>>>>()?
+                .into_iter()
+                .map(|ss| qlist!(ss.into_iter().map(|s| qstr!(s)).collect()))
+                .collect();
+            if res.len() == 1 {
+                Ok(res.into_iter().next().unwrap())
+            } else {
+                Ok(qlist!(res))
+            }
+        };
+    }
+
     fn repl_func(&mut self, exp: &QExp, args: &[QExp])
         -> Option<QResult<ReplOut>>
     {
@@ -2390,6 +2633,10 @@ Available topics:"
             match s.as_ref() {
                 "help" | "?"
                     => Some(self.repl_eval_help(args).map(ReplOut::as_noprint)),
+                "vars"
+                    => Some(self.repl_eval_vars(args).map(ReplOut::as_print)),
+                "defs"
+                    => Some(self.repl_eval_defs(args).map(ReplOut::as_print)),
                 _ => None,
             }
         } else {
@@ -2433,8 +2680,7 @@ impl reed::Prompt for QPrompt {
     }
 }
 
-pub fn run_repl() {
-    let mut env = QEnv::default();
+pub fn run_repl(env: &mut QEnv) {
     let mut line_editor = reed::Reedline::create();
     let prompt = QPrompt { };
     println!(

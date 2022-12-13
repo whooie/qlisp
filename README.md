@@ -32,14 +32,18 @@ See [qlisp.vim][qlisp.vim] for basic syntax highlighting in Vim.
 - [x] add a CLI and read executable expressions from files
 - [x] add various math/statistics functions
 - [x] add pattern-matching args to lambdas
+- [x] add namespaces and importing definitions from other files
 - [ ] add hash maps
 - [ ] add (nd)arrays
 - [ ] add file I/O with hash map serialization to `json`, `toml`, `yaml`, ...
-- [ ] add namespaces and importing definitions from other files
 
-<!-- ## Known bugs -->
-<!-- - ~~single-item lists have their contents evaluated twice, e.g. -->
-<!--   `((print "{}" 0))`~~ -->
+## Known bugs / things I'm not happy about
+- ~~single-item lists have their contents evaluated twice, e.g.
+  `((print "{}" 0))`~~
+- evaluation of imported functions is messy and involves cloning the functions'
+  environments for each call outside of an iterator routine (e.g. `map`)
+- the system for printing help text in the REPL is clunky
+- there's probably much more cloning than is absolutely necessary
 
 [risp]: https://stopa.io/post/222
 [quacs]: https://gitlab.com/whooie/quacs/-/tree/rustlib

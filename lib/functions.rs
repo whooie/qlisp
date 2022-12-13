@@ -1,6 +1,9 @@
 use std::{
     cmp,
+    fs::File,
+    io::Read,
     mem,
+    path::PathBuf,
     rc::Rc,
 };
 use itertools::Itertools;
@@ -18,6 +21,7 @@ use crate::{
     qlambda,
     qany,
     lang::{
+        FILE_EXTENSIONS,
         PROTECTED,
         QErr,
         QResult,
@@ -25,6 +29,7 @@ use crate::{
         QExpType,
         QLambda,
         QEnv,
+        QEnvEntry,
         Indexable,
         convert_type,
         convert_type_num,
@@ -32,6 +37,7 @@ use crate::{
         typecast,
         FormatX,
     },
+    repl::run_repl,
 };
 
 /*
@@ -48,6 +54,9 @@ pub fn fn_def(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
             if PROTECTED.contains(&s.as_ref()) {
                 Err(qerr_fmt!(
                     "def: cannot overwrite protected symbol '{}'", s))
+            } else if s.contains("::") {
+                Err(qerr!(
+                    "def: cannot overwrite values outside the local scope"))
             } else {
                 Ok(s.clone())
             }
@@ -55,7 +64,7 @@ pub fn fn_def(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         _ => Err(qerr!("def: first arg must be a symbol")),
     }?;
     let val: QExp = env.eval(args.get(1).unwrap())?;
-    env.insert(symbol, val.clone());
+    env.insert(symbol, QEnvEntry::Exp(val.clone()));
     return Ok(val);
 }
 
@@ -74,8 +83,16 @@ pub fn fn_let(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
                 syms.iter().zip(vals.iter())
                     .map(|(sk, vk)| {
                         match (sk, vk) {
-                            (qsymbol!(_), _)
-                                => Ok((sk.clone(), vk.clone())),
+                            (qsymbol!(s), _) => {
+                                if s.contains("::") {
+                                    Err(qerr!(
+                                        "let: cannot overwrite values outside \
+                                        the local scope"
+                                    ))
+                                } else {
+                                    Ok((sk.clone(), vk.clone()))
+                                }
+                            },
                             (qlist!(_), qlist!(_)) => {
                                 get_assignments(sk, vk)
                                     .map(|subass| {
@@ -103,7 +120,7 @@ pub fn fn_let(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     {
         return match (sym, val) {
             (qsymbol!(s), v) => {
-                env.insert(s, v.clone());
+                env.insert(s, QEnvEntry::Exp(v.clone()));
                 Ok(())
             },
             (qlist!(syms), qlist!(vals)) => {
@@ -141,7 +158,7 @@ pub fn fn_fn(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
                 if protected.contains(s) {
                     qsymbol!(s.clone())
                 } else {
-                    env.get_cloned(s).unwrap_or_else(|| body_exp.clone())
+                    env.get_exp_cloned(s).unwrap_or_else(|| body_exp.clone())
                 }
             },
             qlist!(l) => qlist!(
@@ -158,6 +175,10 @@ pub fn fn_fn(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         for qk in exps.iter() {
             match qk {
                 qsymbol!(s) => {
+                    if s.contains("::") {
+                        return Err(qerr!(
+                            "fn: invalid arg name: cannot contain '::'"));
+                    }
                     symbols.push(s.clone());
                     pattern.push(qsymbol!(s.clone()));
                 },
@@ -212,6 +233,9 @@ pub fn fn_defn(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
             if PROTECTED.contains(&s.as_ref()) {
                 Err(qerr_fmt!(
                     "defn: cannot overwrite protected symbol '{}'", s))
+            } else if s.contains("::") {
+                Err(qerr!(
+                    "defn: cannot overwrite symbols outside the local scope"))
             } else {
                 Ok(s.clone())
             }
@@ -219,7 +243,7 @@ pub fn fn_defn(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         _ => Err(qerr!("defn: first arg must be a symbol")),
     }?;
     let lambda: QExp = fn_fn(env, &args[1..])?;
-    env.insert(symbol, lambda.clone());
+    env.insert(symbol, QEnvEntry::Exp(lambda.clone()));
     return Ok(lambda)
 }
 
@@ -235,6 +259,177 @@ pub fn fn_if(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
             env.eval(args.get(branch_idx).unwrap())
         },
         _ => Err(qerr!("if: test arg must evaluate to a boolean")),
+    };
+}
+
+pub fn fn_module(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    if args.len() != 2 {
+        return Err(qerr_fmt!(
+            "module: expected 2 args but got {}", args.len()));
+    }
+    let name: String = match args.get(0).unwrap() {
+        qsymbol!(s) => {
+            if PROTECTED.contains(&s.as_ref()) {
+                Err(qerr_fmt!(
+                    "module: cannot overwrite protected symbol '{}'", s))
+            } else if s.contains("::") {
+                Err(qerr!(
+                    "module: cannot overwrite values outside the local scope"))
+            } else {
+                Ok(s.clone())
+            }
+        },
+        _ => Err(qerr!("module: first arg must be a symbol")),
+    }?;
+    let mut mod_env = env.clone();
+    let mod_values: Vec<QExp> = match args.get(1).unwrap() {
+        qlist!(l) => mod_env.eval_multi(l),
+        _ => Err(qerr!("module: second arg must be a list of expressions")),
+    }?;
+    env.insert(name, QEnvEntry::Mod(mod_env));
+    return Ok(qlist!(mod_values));
+}
+
+pub fn fn_use(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    if !(1..=2).contains(&args.len()) {
+        return Err(qerr_fmt!(
+            "use: expected 1 or 2 args but got {}", args.len()));
+    }
+    let path: &String = match args.get(0).unwrap() {
+        qsymbol!(s) => Ok(s),
+        _ => Err(qerr!("use: arg must be a symbol")),
+    }?;
+    let filepath: PathBuf
+        = env.dir.join(
+            path.split("::")
+            .map(|s| if s == "super" { ".." } else { s })
+            .collect::<PathBuf>()
+        );
+    let symbol: String = match args.get(1) {
+        Some(qsymbol!(s)) => {
+            if PROTECTED.contains(&s.as_ref()) {
+                Err(qerr_fmt!("use: cannot overwrite protected symbol '{}'", s))
+            } else if s.contains("::") {
+                Err(qerr!(
+                    "use: cannot overwrite symbols outside the local scope"))
+            } else {
+                Ok(s.clone())
+            }
+        },
+        None => Ok(
+            filepath.file_stem().unwrap()
+            .to_string_lossy().into_owned()
+        ),
+        _ => Err(qerr!("use: second arg must be a symbol")),
+    }?;
+    let mut mod_env
+        = QEnv::default_with_dir(filepath.parent().unwrap().to_path_buf());
+    for ext in FILE_EXTENSIONS.iter() {
+        let file = filepath.with_extension(*ext);
+        if file.is_file() {
+            let display = file.display();
+            let mut file = File::open(&file)
+                .map_err(|e| qerr_fmt!(
+                    "use: cannot read file {}: {}", display, e
+                ))?;
+            let mut code = String::new();
+            file.read_to_string(&mut code)
+                .map_err(|e| qerr_fmt!(
+                    "use: cannot read file {}: {}", display, e
+                ))?;
+            mod_env.parse_eval(code)
+                .map_err(|e| qerr_fmt!(
+                    "use: cannot load module '{}': {}", path, e.message()
+                ))?;
+            env.insert(symbol, QEnvEntry::Mod(mod_env));
+            return Ok(qint!(0));
+        }
+    }
+    return Err(qerr_fmt!("use: cannot not load module {}", path));
+}
+
+pub fn fn_use_all(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    if args.len() != 1 {
+        return Err(qerr_fmt!(
+            "use-all: expected 1 arg but got {}", args.len()));
+    }
+    let path: &String = match args.get(0).unwrap() {
+        qsymbol!(s) => Ok(s),
+        _ => Err(qerr!("use-all: arg must be a symbol")),
+    }?;
+    let mut filepath: PathBuf
+        = env.dir.join(
+            path.split("::")
+            .map(|s| if s == "super" { ".." } else { s })
+            .collect::<PathBuf>()
+        );
+    for ext in FILE_EXTENSIONS.iter() {
+        let file = filepath.with_extension(*ext);
+        if file.is_file() {
+            let display = file.display();
+            let mut file = File::open(&file)
+                .map_err(|e| qerr_fmt!(
+                    "use-all: cannot read file {}: {}", display, e
+                ))?;
+            let mut code = String::new();
+            file.read_to_string(&mut code)
+                .map_err(|e| qerr_fmt!(
+                    "use-all: could not interpret file {}: {}", display, e
+                ))?;
+            mem::swap(&mut env.dir, &mut filepath);
+            env.parse_eval(code)?;
+            mem::swap(&mut env.dir, &mut filepath);
+            return Ok(qint!(0));
+        }
+    }
+    return Err(qerr_fmt!("use-all: cannot not load module {}", path));
+}
+
+pub fn fn_interact(env: &mut QEnv, _args: &[QExp]) -> QResult<QExp> {
+    run_repl(env);
+    return Ok(qint!(0));
+}
+
+pub fn fn_isdef(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    let isdef: bool
+        = args.iter()
+        .map(|qk| match qk {
+            qsymbol!(s) => Ok(s),
+            _ => Err(qerr!("isdef: args must be symbols")),
+        })
+        .collect::<QResult<Vec<&String>>>()?
+        .into_iter()
+        .all(|sym| env.get(sym).is_some());
+    return Ok(qbool!(isdef));
+}
+
+pub fn fn_del(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    let vals: Vec<QExp>
+        = args.iter()
+        .map(|qk| match qk {
+            qsymbol!(s) => {
+                if s.contains("::") {
+                    Err(qerr!(
+                        "del: cannot remove variables outside the local \
+                        environment"
+                    ))
+                } else {
+                    env.remove(s).map_err(|e| e.prepend_source("del"))
+                }
+            },
+            _ => Err(qerr!("del: args must be symbols")),
+        })
+        .collect::<QResult<Vec<QEnvEntry>>>()?
+        .into_iter()
+        .filter_map(|q| match q {
+            QEnvEntry::Exp(e) => Some(e),
+            QEnvEntry::Mod(_) => None,
+        })
+        .collect();
+    return if vals.len() == 1 {
+        Ok(vals.into_iter().next().unwrap())
+    } else {
+        Ok(qlist!(vals))
     };
 }
 
@@ -2490,4 +2685,69 @@ pub fn fn_moment(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
  */
 
 // pub fn eval_sample(&mut self, args: &[QExp]) -> QResult<QExp>;
+
+/*
+ * phys module
+ */
+
+pub fn phys_nmrgb(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    fn do_nmrgb(nm: f64) -> (f64, f64, f64) {
+        const gamma: f64 = 0.80;
+        const intensity_max: f64 = 255.0;
+        let (mut r, mut g, mut b): (f64, f64, f64)
+            = if (380.0_f64..440.0).contains(&nm) {
+                (-(nm - 440.0) / (440.0 - 380.0), 0.0, 1.0)
+            } else if (440.0_f64..490.0).contains(&nm) {
+                (0.0, (nm - 440.0) / (490.0 - 440.0), 1.0)
+            } else if (490.0_f64..510.0).contains(&nm) {
+                (0.0, 1.0, -(nm - 510.0) / (510.0 - 490.0))
+            } else if (510.0_f64..580.0).contains(&nm) {
+                ((nm - 510.0) / (580.0 - 510.0), 1.0, 0.0)
+            } else if (580.0_f64..645.0).contains(&nm) {
+                (1.0, -(nm - 645.0) / (645.0 - 580.0), 0.0)
+            } else if (645.0_f64..781.0).contains(&nm) {
+                (1.0, 0.0, 0.0)
+            } else {
+                (0.0, 0.0, 0.0)
+            };
+        let factor: f64
+            = if (380.0_f64..420.0).contains(&nm) {
+                0.3 + 0.7 * (nm - 380.0) / (420.0 - 380.0)
+            } else if (420.0_f64..701.0).contains(&nm) {
+                1.0
+            } else if (701.0_f64..781.0).contains(&nm) {
+                0.3 + 0.7 * (781.0 - nm) / (781.0 - 701.0)
+            } else {
+                0.0
+            };
+        r = intensity_max * (factor * r).powf(gamma);
+        g = intensity_max * (factor * g).powf(gamma);
+        b = intensity_max * (factor * b).powf(gamma);
+        return (r, g, b);
+    }
+
+    if args.is_empty() {
+        return Err(qerr_fmt!(
+            "nmrgb: expected at least 1 arg but got {}", args.len()));
+    }
+    let rgb: Vec<QExp>
+        = env.eval_multi(args)?
+        .into_iter()
+        .map(|qk| match qk {
+            qbool!(b) => Ok(if b { 1.0 } else { 0.0 }),
+            qint!(i) => Ok(i as f64),
+            qfloat!(f) => Ok(f),
+            _ => Err(qerr!("nmrgb: args must be real numbers")),
+        })
+        .collect::<QResult<Vec<f64>>>()?
+        .into_iter()
+        .map(do_nmrgb)
+        .map(|(r, g, b)| qlist!(vec![qfloat!(r), qfloat!(g), qfloat!(b)]))
+        .collect();
+    return if rgb.len() == 1 {
+        Ok(rgb.into_iter().next().unwrap())
+    } else {
+        Ok(qlist!(rgb))
+    };
+}
 

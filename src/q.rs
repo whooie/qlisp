@@ -53,13 +53,19 @@ fn main() {
                 exit(2);
             },
         };
-        let mut env = QEnv::default();
+        let mut env
+            = QEnv::default_with_dir(
+                infile.parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or(PathBuf::from("."))
+            );
         match env.parse_eval(command) {
             Ok(_) => { },
             Err(e) => { println!("Error: {}", e.message()); },
         }
     } else {
-        run_repl();
+        let mut env = QEnv::default();
+        run_repl(&mut env);
     }
 
     exit(0);

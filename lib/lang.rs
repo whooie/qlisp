@@ -3,6 +3,7 @@ use std::{
     collections::HashMap,
     fmt,
     mem,
+    path::PathBuf,
     rc::Rc,
     str::FromStr,
 };
@@ -51,6 +52,11 @@ macro_rules! qerr_fmt(
     }
 );
 
+pub const FILE_EXTENSIONS: &[&str] = &[
+    "qlisp",
+    "qlsp",
+];
+
 pub const PROTECTED: &[&str] = &[
     // constants
     "PI", "2PI", "iPI", "i2PI",
@@ -59,14 +65,16 @@ pub const PROTECTED: &[&str] = &[
     "nan", "naN", "nAn", "nAN", "Nan", "NaN", "NAn", "NAN",
     // special -- keyword-like
     "def",              ":=",   // done
-    "let",              ":=*",  // done
+    "let",              "*:=",  // done
     "fn",               "@:",   // done
     "defn",             "@:=",  // done
-    "if",               "=>",   // done
-    "and",              "&&",   // done
-    "or",               "||",   // done
-    "xor",              "^",    // done
-
+    "if",                       // done
+    "module",                   // done
+    "use",                      // done
+    "use-all",          "use*", // done
+    "interact",                 // done
+    "isdef",            "?:=",  // done
+    "del",              "!-",   // done
     // systems
     "format",           "$",    // done
     "print",            "$-",   // done
@@ -88,6 +96,9 @@ pub const PROTECTED: &[&str] = &[
     "div",              "/",    // done
     "idiv",             "//",   // done
     // boolean comparisons
+    "and",              "&&",   // done
+    "or",               "||",   // done
+    "xor",              "^",    // done
     "eq",               "=",    // done
     "neq",              "!=",   // done
     "gt",               ">",    // done
@@ -144,7 +155,7 @@ pub const PROTECTED: &[&str] = &[
     "insert",           "+.+",  // done
     "join",             "++",   // done
     "join-with",        "+*+",  // done
-    "zip",              "::",   // done
+    "zip",              ":~:",  // done
     "cart",             ":*:",  // done
     // iterable testing
     "contains",         "*=",   // done
@@ -152,55 +163,56 @@ pub const PROTECTED: &[&str] = &[
 
     // element-wise math
     "neg",              "!",    // done
-    "recip",            "1/",   //
-    "abs",              "|.|",  //
-    "sqrt",                     //
-    "cbrt",                     //
-    "exp",              "e**",  //
-    "floor",            "~_",   //
-    "ceil",             "~^",   //
-    "round",            "~:",   //
-    "ln",                       //
-    "sin",                      //
-    "cos",                      //
-    "tan",                      //
-    "arcsin",           "asin", //
-    "arccos",           "acos", //
-    "arctan",           "atan", //
-    "arctan2",          "atanh",//
-    "sinh",                     //
-    "cosh",                     //
-    "tanh",                     //
-    "arsinh",           "asinh",//
-    "arcosh",           "acosh",//
-    "artanh",           "atanh",//
-    "arg",                      //
-    "cis",              "e**i", //
-    "conj",             "~z",   //
-    "real",             "Re",   //
-    "imag",             "Im",   //
+    "recip",            "1/",   // done
+    "abs",              "|.|",  // done
+    "sqrt",                     // done
+    "cbrt",                     // done
+    "exp",              "e**",  // done
+    "floor",            "~_",   // done
+    "ceil",             "~^",   // done
+    "round",            "~:",   // done
+    "ln",                       // done
+    "sin",                      // done
+    "cos",                      // done
+    "tan",                      // done
+    "arcsin",           "asin", // done
+    "arccos",           "acos", // done
+    "arctan",           "atan", // done
+    "arctan2",          "atan2",// done
+    "sinh",                     // done
+    "cosh",                     // done
+    "tanh",                     // done
+    "arsinh",           "asinh",// done
+    "arcosh",           "acosh",// done
+    "artanh",           "atanh",// done
+    "arg",                      // done
+    "cis",              "e**i", // done
+    "conj",             "~z",   // done
+    "real",             "Re",   // done
+    "imag",             "Im",   // done
     // parameterized element-wise math
     "mod",              "%",    // done
-    "log",                      //
-    "pow",              "**",   //
+    "log",                      // done
+    "pow",              "**",   // done
     // list -> list math
-    "convolve",         "{*}",  //
-    "hist",             "|#|",  //
-    "hist-prob",        "|p|",  //
-    "fft",              "{F}",  //
-    "ifft",             "{iF}", //
-    "findpeaks",        "^?",   //
-    "covariance",       "Cov",  //
-    "correlation",      "Corr", //
+    "convolve",         "<:>",  // done
+    "hist",             "|#|",  // done
+    "hist-prob",        "|p|",  // done
+    "covariance",       "Cov",  // done
+    "correlation",      "Corr", // done
+    // "fft",              "{F}",  //
+    // "ifft",             "{iF}", //
     // list -> value math
-    "mean",             "{E}",  //
-    "variance",         "Var",  //
-    "stddev",           "Std",  //
+    "mean",                     // done
+    "variance",         "Var",  // done
+    "stddev",           "Std",  // done
     // list+1 -> value math
-    "pnorm",            "|+|",  //
-    "moment",           "{En}", //
+    "pnorm",            "|+|",  // done
+    "moment",                   // done
     // special-arg math
     "sample",           "?.",   //
+    // default modules
+    "phys",
 ];
 
 pub type QResult<T> = Result<T, QErr>;
@@ -1154,13 +1166,13 @@ impl QLambda {
         fn let_assignment(
             lhs: &[QExp],
             rhs: &[QExp],
-            data: &mut HashMap<String, QExp>
+            data: &mut HashMap<String, QEnvEntry>
         ) -> QResult<()>
         {
             for (lk, rk) in lhs.iter().zip(rhs) {
                 match (lk, rk) {
                     (qsymbol!(s), q) => {
-                        data.insert(s.clone(), q.clone());
+                        data.insert(s.clone(), QEnvEntry::Exp(q.clone()));
                     },
                     (qlist!(l), qlist!(r)) => {
                         let_assignment(l, r, data)?;
@@ -1176,24 +1188,13 @@ impl QLambda {
         }
 
         let values: Vec<QExp> = outer_env.eval_multi(args)?;
-        let mut data: HashMap<String, QExp> = HashMap::new();
+        let mut data: HashMap<String, QEnvEntry> = HashMap::new();
         let_assignment(self.arg_pattern.as_ref(), &values, &mut data)?;
-
-        // let symbols: Vec<String>
-        //     = Self::parse_symbols(self.params_exp.clone())?;
-        // if symbols.len() != args.len() {
-        //     return Err(qerr_fmt!(
-        //         "expected {} arguments but got {}",
-        //         symbols.len(),
-        //         args.len()
-        //     ));
-        // }
-        // let values: Vec<QExp> = outer_env.eval_multi(args)?;
-        // let mut data: HashMap<String, QExp> = HashMap::new();
-        // for (k, v) in symbols.into_iter().zip(values.into_iter()) {
-        //     data.insert(k, v);
-        // }
-        return Ok(QEnv { data, outer: Some(outer_env) });
+        return Ok(QEnv {
+            data,
+            outer: Some(outer_env),
+            dir: outer_env.dir.clone()
+        });
     }
 
     pub fn eval(&self, outer_env: &mut QEnv, args: &[QExp])
@@ -2675,219 +2676,321 @@ pub fn parse_atom(token: &str) -> QResult<QExp> {
     };
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct QEnv<'a> {
-    data: HashMap<String, QExp>,
+    data: HashMap<String, QEnvEntry<'a>>,
     outer: Option<&'a QEnv<'a>>,
+    pub dir: PathBuf,
 }
 
-// #[derive(Clone)]
-// pub struct QEnv<'a> {
-//     data: HashMap<String, QEnvEntry<'a>>,
-//     outer: Option<&'a QEnv<'a>>,
-// }
-//
-// pub enum QEnvEntry<'a> {
-//     Exp(QExp),
-//     Mod(QEnv<'a>),
-// }
+#[derive(Clone, Debug)]
+pub enum QEnvEntry<'a> {
+    Exp(QExp),
+    Mod(QEnv<'a>),
+}
+
+macro_rules! add_mod(
+    ( $env:ident, $name:literal, $mod:ident ) => {
+        $env.insert(
+            $name.to_string(),
+            QEnvEntry::Mod(QEnv {
+                data: $mod,
+                outer: None,
+                dir: PathBuf::from("."),
+            })
+        );
+    }
+);
 
 macro_rules! add_fn(
     ( $env:ident, $name:literal, $alias:literal, $fn:ident ) => {
-        $env.insert($name.to_string(),  QExp::Func($name.to_string(), $fn));
-        $env.insert($alias.to_string(), QExp::Func($name.to_string(), $fn));
+        $env.insert(
+            $name.to_string(),
+            QEnvEntry::Exp(QExp::Func($name.to_string(), $fn))
+        );
+        $env.insert(
+            $alias.to_string(),
+            QEnvEntry::Exp(QExp::Func($name.to_string(), $fn))
+        );
     };
     ( $env:ident, $name:literal, $alias:literal, $fn:path ) => {
-        $env.insert($name.to_string(),  QExp::Func($name.to_string(), $fn));
-        $env.insert($alias.to_string(), QExp::Func($name.to_string(), $fn));
+        $env.insert(
+            $name.to_string(),
+            QEnvEntry::Exp(QExp::Func($name.to_string(), $fn))
+        );
+        $env.insert(
+            $alias.to_string(),
+            QEnvEntry::Exp(QExp::Func($name.to_string(), $fn))
+        );
     };
     ( $env:ident, $name:literal, $fn:ident ) => {
-        $env.insert($name.to_string(), QExp::Func($name.to_string(), $fn));
+        $env.insert(
+            $name.to_string(),
+            QEnvEntry::Exp(QExp::Func($name.to_string(), $fn))
+        );
     };
     ( $env:ident, $name:literal, $fn:path ) => {
-        $env.insert($name.to_string(), QExp::Func($name.to_string(), $fn));
+        $env.insert(
+            $name.to_string(),
+            QEnvEntry::Exp(QExp::Func($name.to_string(), $fn))
+        );
     };
+);
+
+macro_rules! add_float(
+    ( $env: ident, $name:literal, $f:expr ) => {
+        $env.insert($name.to_string(), QEnvEntry::Exp(QExp::Float($f)));
+    }
 );
 
 impl<'a> Default for QEnv<'a> {
     fn default() -> QEnv<'a> {
-        let mut env: HashMap<String, QExp> = HashMap::new();
-            // special -- keyword-like
-            add_fn!(env, "def",             ":=",   fns::fn_def           );
-            add_fn!(env, "let",             "*:=",  fns::fn_let           );
-            add_fn!(env, "fn",              "@:",   fns::fn_fn            );
-            add_fn!(env, "defn",            "@:=",  fns::fn_defn          );
-            add_fn!(env, "if",              "=>",   fns::fn_if            );
-            // systems
-            add_fn!(env, "format",          "$",    fns::fn_format        );
-            add_fn!(env, "print",           "$-",   fns::fn_print         );
-            add_fn!(env, "println",         "$_",   fns::fn_println       );
-            add_fn!(env, "halt",            "!!",   fns::fn_halt          );
-            add_fn!(env, "istype",          "~?",   fns::fn_istype        );
-            add_fn!(env, "type",            "?~",   fns::fn_type          );
-            // type-casting
-            add_fn!(env, "bool",                    fns::fn_bool          );
-            add_fn!(env, "int",                     fns::fn_int           );
-            add_fn!(env, "float",                   fns::fn_float         );
-            add_fn!(env, "complex",                 fns::fn_complex       );
-            add_fn!(env, "list",                    fns::fn_list          );
-            add_fn!(env, "str",                     fns::fn_str           );
-            // arithmetic
-            add_fn!(env, "add",             "+",    fns::fn_add           );
-            add_fn!(env, "sub",             "-",    fns::fn_sub           );
-            add_fn!(env, "mul",             "*",    fns::fn_mul           );
-            add_fn!(env, "div",             "/",    fns::fn_div           );
-            add_fn!(env, "idiv",            "//",   fns::fn_idiv          );
-            // boolean comparisons
-            add_fn!(env, "and",             "&&",   fns::fn_and           );
-            add_fn!(env, "or",              "||",   fns::fn_or            );
-            add_fn!(env, "xor",             "^",    fns::fn_xor           );
-            add_fn!(env, "eq",              "=",    fns::fn_eq            );
-            add_fn!(env, "neq",             "!=",   fns::fn_neq           );
-            add_fn!(env, "gt",              ">",    fns::fn_gt            );
-            add_fn!(env, "geq",             ">=",   fns::fn_geq           );
-            add_fn!(env, "lt",              "<",    fns::fn_lt            );
-            add_fn!(env, "leq",             "<=",   fns::fn_leq           );
-            // boolean accumulators
-            add_fn!(env, "all",             "&&*",  fns::fn_all           );
-            add_fn!(env, "any",             "||*",  fns::fn_any           );
-            add_fn!(env, "xany",            "^*",   fns::fn_xany          );
-            // iterable creation
-            add_fn!(env, "range",           "..",   fns::fn_range         );
-            add_fn!(env, "range-inc",       "..=",  fns::fn_range_inc     );
-            add_fn!(env, "repeat",          "#=",   fns::fn_repeat        );
-            // iterable accumulation
-            add_fn!(env, "length",          "#",    fns::fn_length        );
-            add_fn!(env, "fold",            "@.",   fns::fn_fold          );
-            add_fn!(env, "min",             "<<",   fns::fn_min           );
-            add_fn!(env, "max",             ">>",   fns::fn_max           );
-            add_fn!(env, "select-by",       "*@.",  fns::fn_select_by     );
-            // iterable slicing and access
-            add_fn!(env, "get",             ".",    fns::fn_get           );
-            add_fn!(env, "set",             ".:=",  fns::fn_set           );
-            add_fn!(env, "slice",           "--",   fns::fn_slice         );
-            add_fn!(env, "slice-inc",       "--=",  fns::fn_slice_inc     );
-            add_fn!(env, "slice-by",        "~~",   fns::fn_slice_by      );
-            add_fn!(env, "slice-inc-by",    "~~=",  fns::fn_slice_inc_by  );
-            add_fn!(env, "pick",            ".*",   fns::fn_pick          );
-            add_fn!(env, "first",           ".-",   fns::fn_first         );
-            add_fn!(env, "take",            "~.",   fns::fn_take          );
-            add_fn!(env, "take-while",      "~.@",  fns::fn_take_while    );
-            add_fn!(env, "last",            "-.",   fns::fn_last          );
-            add_fn!(env, "skip",            ".~",   fns::fn_skip          );
-            add_fn!(env, "skip-while",      ".~@",  fns::fn_skip_while    );
-            // iterable transformation
-            add_fn!(env, "step-by",         "~",    fns::fn_step_by       );
-            add_fn!(env, "enumerate",       "##",   fns::fn_enumerate     );
-            add_fn!(env, "reverse",         "<>",   fns::fn_reverse       );
-            add_fn!(env, "cycle",           "<#>",  fns::fn_cycle         );
-            add_fn!(env, "map",             "@",    fns::fn_map           );
-            add_fn!(env, "filter",          "@!",   fns::fn_filter        );
-            add_fn!(env, "unique",          "*!=",  fns::fn_unique        );
-            add_fn!(env, "flatten",         "__",   fns::fn_flatten       );
-            add_fn!(env, "sort",            "<*",   fns::fn_sort          );
-            add_fn!(env, "sort-by",         "<@",   fns::fn_sort_by       );
-            add_fn!(env, "permute",         ".~.",  fns::fn_permute       );
-            // iterable division
-            add_fn!(env, "split-at",        "|.",   fns::fn_split_at      );
-            add_fn!(env, "split-on",        "|@",   fns::fn_split_on      );
-            add_fn!(env, "split-on-inc",    "|@=",  fns::fn_split_on_inc  );
-            // iterable addition
-            add_fn!(env, "append",          "+.",   fns::fn_append        );
-            add_fn!(env, "prepend",         ".+",   fns::fn_prepend       );
-            add_fn!(env, "insert",          "+.+",  fns::fn_insert        );
-            add_fn!(env, "join",            "++",   fns::fn_join          );
-            add_fn!(env, "join-with",       "+*+",  fns::fn_join_with     );
-            add_fn!(env, "zip",             "::",   fns::fn_zip           );
-            add_fn!(env, "cart",            ":*:",  fns::fn_cart          );
-            // iterable testing
-            add_fn!(env, "contains",        "*=",   fns::fn_contains      );
-            add_fn!(env, "index-of",        "#*=",  fns::fn_index_of      );
+        let mut env: HashMap<String, QEnvEntry> = HashMap::new();
+        // special -- keyword-like
+        add_fn!(env, "def",             ":=",   fns::fn_def             );
+        add_fn!(env, "let",             "*:=",  fns::fn_let             );
+        add_fn!(env, "fn",              "@:",   fns::fn_fn              );
+        add_fn!(env, "defn",            "@:=",  fns::fn_defn            );
+        add_fn!(env, "if",                      fns::fn_if              );
+        add_fn!(env, "module",                  fns::fn_module          );
+        add_fn!(env, "use",                     fns::fn_use             );
+        add_fn!(env, "use-all",         "use*", fns::fn_use_all         );
+        add_fn!(env, "interact",                fns::fn_interact        );
+        add_fn!(env, "isdef",           "?:=",  fns::fn_isdef           );
+        add_fn!(env, "del",             "!-",   fns::fn_del             );
+        // systems
+        add_fn!(env, "format",          "$",    fns::fn_format          );
+        add_fn!(env, "print",           "$-",   fns::fn_print           );
+        add_fn!(env, "println",         "$_",   fns::fn_println         );
+        add_fn!(env, "halt",            "!!",   fns::fn_halt            );
+        add_fn!(env, "istype",          "~?",   fns::fn_istype          );
+        add_fn!(env, "type",            "?~",   fns::fn_type            );
+        // add_fn!(env, "with-file",       "$|",   fns::fn_with_file       );
+        // type-casting
+        add_fn!(env, "bool",                    fns::fn_bool            );
+        add_fn!(env, "int",                     fns::fn_int             );
+        add_fn!(env, "float",                   fns::fn_float           );
+        add_fn!(env, "complex",                 fns::fn_complex         );
+        add_fn!(env, "list",                    fns::fn_list            );
+        add_fn!(env, "str",                     fns::fn_str             );
+        // arithmetic
+        add_fn!(env, "add",             "+",    fns::fn_add             );
+        add_fn!(env, "sub",             "-",    fns::fn_sub             );
+        add_fn!(env, "mul",             "*",    fns::fn_mul             );
+        add_fn!(env, "div",             "/",    fns::fn_div             );
+        add_fn!(env, "idiv",            "//",   fns::fn_idiv            );
+        // boolean comparisons
+        add_fn!(env, "and",             "&&",   fns::fn_and             );
+        add_fn!(env, "or",              "||",   fns::fn_or              );
+        add_fn!(env, "xor",             "^",    fns::fn_xor             );
+        add_fn!(env, "eq",              "=",    fns::fn_eq              );
+        add_fn!(env, "neq",             "!=",   fns::fn_neq             );
+        add_fn!(env, "gt",              ">",    fns::fn_gt              );
+        add_fn!(env, "geq",             ">=",   fns::fn_geq             );
+        add_fn!(env, "lt",              "<",    fns::fn_lt              );
+        add_fn!(env, "leq",             "<=",   fns::fn_leq             );
+        // boolean accumulators
+        add_fn!(env, "all",             "&&*",  fns::fn_all             );
+        add_fn!(env, "any",             "||*",  fns::fn_any             );
+        add_fn!(env, "xany",            "^*",   fns::fn_xany            );
+        // iterable creation
+        add_fn!(env, "range",           "..",   fns::fn_range           );
+        add_fn!(env, "range-inc",       "..=",  fns::fn_range_inc       );
+        add_fn!(env, "repeat",          "#=",   fns::fn_repeat          );
+        // iterable accumulation
+        add_fn!(env, "length",          "#",    fns::fn_length          );
+        add_fn!(env, "fold",            "@.",   fns::fn_fold            );
+        add_fn!(env, "min",             "<<",   fns::fn_min             );
+        add_fn!(env, "max",             ">>",   fns::fn_max             );
+        add_fn!(env, "select-by",       "*@.",  fns::fn_select_by       );
+        // iterable slicing and access
+        add_fn!(env, "get",             ".",    fns::fn_get             );
+        add_fn!(env, "set",             ".:=",  fns::fn_set             );
+        add_fn!(env, "slice",           "--",   fns::fn_slice           );
+        add_fn!(env, "slice-inc",       "--=",  fns::fn_slice_inc       );
+        add_fn!(env, "slice-by",        "~~",   fns::fn_slice_by        );
+        add_fn!(env, "slice-inc-by",    "~~=",  fns::fn_slice_inc_by    );
+        add_fn!(env, "pick",            ".*",   fns::fn_pick            );
+        add_fn!(env, "first",           ".-",   fns::fn_first           );
+        add_fn!(env, "take",            "~.",   fns::fn_take            );
+        add_fn!(env, "take-while",      "~.@",  fns::fn_take_while      );
+        add_fn!(env, "last",            "-.",   fns::fn_last            );
+        add_fn!(env, "skip",            ".~",   fns::fn_skip            );
+        add_fn!(env, "skip-while",      ".~@",  fns::fn_skip_while      );
+        // iterable transformation
+        add_fn!(env, "step-by",         "~",    fns::fn_step_by         );
+        add_fn!(env, "enumerate",       "##",   fns::fn_enumerate       );
+        add_fn!(env, "reverse",         "<>",   fns::fn_reverse         );
+        add_fn!(env, "cycle",           "<#>",  fns::fn_cycle           );
+        add_fn!(env, "map",             "@",    fns::fn_map             );
+        add_fn!(env, "filter",          "@!",   fns::fn_filter          );
+        add_fn!(env, "unique",          "*!=",  fns::fn_unique          );
+        add_fn!(env, "flatten",         "__",   fns::fn_flatten         );
+        add_fn!(env, "sort",            "<*",   fns::fn_sort            );
+        add_fn!(env, "sort-by",         "<@",   fns::fn_sort_by         );
+        add_fn!(env, "permute",         ".~.",  fns::fn_permute         );
+        // iterable division
+        add_fn!(env, "split-at",        "|.",   fns::fn_split_at        );
+        add_fn!(env, "split-on",        "|@",   fns::fn_split_on        );
+        add_fn!(env, "split-on-inc",    "|@=",  fns::fn_split_on_inc    );
+        // iterable addition
+        add_fn!(env, "append",          "+.",   fns::fn_append          );
+        add_fn!(env, "prepend",         ".+",   fns::fn_prepend         );
+        add_fn!(env, "insert",          "+.+",  fns::fn_insert          );
+        add_fn!(env, "join",            "++",   fns::fn_join            );
+        add_fn!(env, "join-with",       "+*+",  fns::fn_join_with       );
+        add_fn!(env, "zip",             ":~:",  fns::fn_zip             );
+        add_fn!(env, "cart",            ":*:",  fns::fn_cart            );
+        // iterable testing
+        add_fn!(env, "contains",        "*=",   fns::fn_contains        );
+        add_fn!(env, "index-of",        "#*=",  fns::fn_index_of        );
 
-            // element-wise math
-            add_fn!(env, "neg",             "!",    fns::fn_neg           );
-            add_fn!(env, "recip",           "1/",   fns::fn_recip         );
-            add_fn!(env, "abs",             "|.|",  fns::fn_abs           );
-            add_fn!(env, "sqrt",                    fns::fn_sqrt          );
-            add_fn!(env, "cbrt",                    fns::fn_cbrt          );
-            add_fn!(env, "exp",             "e**",  fns::fn_exp           );
-            add_fn!(env, "floor",           "~_",   fns::fn_floor         );
-            add_fn!(env, "ceil",            "~^",   fns::fn_ceil          );
-            add_fn!(env, "round",           "~:",   fns::fn_round         );
-            add_fn!(env, "ln",                      fns::fn_ln            );
-            add_fn!(env, "sin",                     fns::fn_sin           );
-            add_fn!(env, "cos",                     fns::fn_cos           );
-            add_fn!(env, "tan",                     fns::fn_tan           );
-            add_fn!(env, "arcsin",          "asin", fns::fn_asin          );
-            add_fn!(env, "arccos",          "acos", fns::fn_acos          );
-            add_fn!(env, "arctan",          "atan", fns::fn_atan          );
-            add_fn!(env, "arctan2",         "atan2",fns::fn_atan2         );
-            add_fn!(env, "sinh",                    fns::fn_sinh          );
-            add_fn!(env, "cosh",                    fns::fn_cosh          );
-            add_fn!(env, "tanh",                    fns::fn_tanh          );
-            add_fn!(env, "arsinh",          "asinh",fns::fn_asinh         );
-            add_fn!(env, "arcosh",          "acosh",fns::fn_acosh         );
-            add_fn!(env, "artanh",          "atanh",fns::fn_atanh         );
-            add_fn!(env, "arg",                     fns::fn_arg           );
-            add_fn!(env, "cis",             "e**i", fns::fn_cis           );
-            add_fn!(env, "conj",            "~z",   fns::fn_conj          );
-            add_fn!(env, "real",            "Re",   fns::fn_real          );
-            add_fn!(env, "imag",            "Im",   fns::fn_imag          );
-            // parameterized element-wise math
-            add_fn!(env, "mod",             "%",    fns::fn_mod           );
-            add_fn!(env, "log",                     fns::fn_log           );
-            add_fn!(env, "pow",             "**",   fns::fn_pow           );
-            // list -> list math
-            add_fn!(env, "convolve",        "{*}",  fns::fn_convolve      );
-            add_fn!(env, "hist",            "|#|",  fns::fn_histogram     );
-            add_fn!(env, "hist-prob",       "|p|",  fns::fn_histogram_prob);
-            add_fn!(env, "covariance",      "Cov",  fns::fn_covariance    );
-            add_fn!(env, "correlation",     "Corr", fns::fn_correlation   );
-            // add_fn!(env, "fft",             "{F}",  fns::fn_fft           );
-            // add_fn!(env, "ifft",            "{iF}", fns::fn_ifft          );
-            // list -> value math
-            add_fn!(env, "mean",            "{E}",  fns::fn_mean          );
-            add_fn!(env, "variance",        "Var",  fns::fn_variance      );
-            add_fn!(env, "stddev",          "Std",  fns::fn_stddev        );
-            // list+1 -> value math
-            add_fn!(env, "pnorm",           "|+|",  fns::fn_pnorm         );
-            add_fn!(env, "moment",          "{En}", fns::fn_moment        );
-            // special-arg math
-            // add_fn!(env, "sample",          "?.",   fns::fn_sample        );
-        return QEnv { data: env, outer: None };
+        // element-wise math
+        add_fn!(env, "neg",             "!",    fns::fn_neg             );
+        add_fn!(env, "recip",           "1/",   fns::fn_recip           );
+        add_fn!(env, "abs",             "|.|",  fns::fn_abs             );
+        add_fn!(env, "sqrt",                    fns::fn_sqrt            );
+        add_fn!(env, "cbrt",                    fns::fn_cbrt            );
+        add_fn!(env, "exp",             "e**",  fns::fn_exp             );
+        add_fn!(env, "floor",           "~_",   fns::fn_floor           );
+        add_fn!(env, "ceil",            "~^",   fns::fn_ceil            );
+        add_fn!(env, "round",           "~:",   fns::fn_round           );
+        add_fn!(env, "ln",                      fns::fn_ln              );
+        add_fn!(env, "sin",                     fns::fn_sin             );
+        add_fn!(env, "cos",                     fns::fn_cos             );
+        add_fn!(env, "tan",                     fns::fn_tan             );
+        add_fn!(env, "arcsin",          "asin", fns::fn_asin            );
+        add_fn!(env, "arccos",          "acos", fns::fn_acos            );
+        add_fn!(env, "arctan",          "atan", fns::fn_atan            );
+        add_fn!(env, "arctan2",         "atan2",fns::fn_atan2           );
+        add_fn!(env, "sinh",                    fns::fn_sinh            );
+        add_fn!(env, "cosh",                    fns::fn_cosh            );
+        add_fn!(env, "tanh",                    fns::fn_tanh            );
+        add_fn!(env, "arsinh",          "asinh",fns::fn_asinh           );
+        add_fn!(env, "arcosh",          "acosh",fns::fn_acosh           );
+        add_fn!(env, "artanh",          "atanh",fns::fn_atanh           );
+        add_fn!(env, "arg",                     fns::fn_arg             );
+        add_fn!(env, "cis",             "e**i", fns::fn_cis             );
+        add_fn!(env, "conj",            "~z",   fns::fn_conj            );
+        add_fn!(env, "real",            "Re",   fns::fn_real            );
+        add_fn!(env, "imag",            "Im",   fns::fn_imag            );
+        // parameterized element-wise math
+        add_fn!(env, "mod",             "%",    fns::fn_mod             );
+        add_fn!(env, "log",                     fns::fn_log             );
+        add_fn!(env, "pow",             "**",   fns::fn_pow             );
+        // list -> list math
+        add_fn!(env, "convolve",        "<:>",  fns::fn_convolve        );
+        add_fn!(env, "hist",            "|#|",  fns::fn_histogram       );
+        add_fn!(env, "hist-prob",       "|p|",  fns::fn_histogram_prob  );
+        add_fn!(env, "covariance",      "Cov",  fns::fn_covariance      );
+        add_fn!(env, "correlation",     "Corr", fns::fn_correlation     );
+        // add_fn!(env, "fft",             "{F}",  fns::fn_fft             );
+        // add_fn!(env, "ifft",            "{iF}", fns::fn_ifft            );
+        // list -> value math
+        add_fn!(env, "mean",                    fns::fn_mean            );
+        add_fn!(env, "variance",        "Var",  fns::fn_variance        );
+        add_fn!(env, "stddev",          "Std",  fns::fn_stddev          );
+        // list+1 -> value math
+        add_fn!(env, "pnorm",           "|+|",  fns::fn_pnorm           );
+        add_fn!(env, "moment",                  fns::fn_moment          );
+        // special-arg math
+        // add_fn!(env, "sample",          "?.",   fns::fn_sample          );
+
+        let mut phys: HashMap<String, QEnvEntry> = HashMap::new();
+        add_float!(phys,    "h",        6.626070040e-34         );
+        add_float!(phys,    "hbar",     1.0545718001391127e-34  );
+        add_float!(phys,    "c",        2.99792458e+8           );
+        add_float!(phys,    "NA",       6.022140857e+23         );
+        add_float!(phys,    "kB",       1.38064852e-23          );
+        add_float!(phys,    "e0",       8.8541878128e-12        );
+        add_float!(phys,    "u0",       1.25663706212e-6        );
+        add_float!(phys,    "G",        6.67430e-11             );
+        add_float!(phys,    "g",        9.80665                 );
+        add_float!(phys,    "e",        1.602176634e-19         );
+        add_float!(phys,    "me",       9.1093837015e-31        );
+        add_float!(phys,    "mp",       1.67262192369e-27       );
+        add_float!(phys,    "mn",       1.67492749804e-27       );
+        add_float!(phys,    "mu",       1.66053906660e-27       );
+        add_float!(phys,    "Rinf",     10973731.568160         );
+        add_float!(phys,    "alpha",    7.2973525693e-3         );
+        add_float!(phys,    "R",        8.314462618             );
+        add_float!(phys,    "SB",       5.670366816083268e-08   );
+        add_float!(phys,    "a0",       5.29177210903e-11       );
+        add_float!(phys,    "uB",       9.2740100783e-24        );
+        add_float!(phys,    "uN",       5.050783699e-27         );
+        add_float!(phys,    "Eh",       4.3597447222071e-18     );
+        add_float!(phys,    "amu",      1.66053906660e-27       );
+        add_fn!(phys, "nmrgb", fns::phys_nmrgb);
+        add_mod!(env, "phys", phys);
+
+        return QEnv { data: env, outer: None, dir: PathBuf::from(".") };
     }
 }
 
 impl<'a> QEnv<'a> {
-    pub fn get_data(&self) -> &HashMap<String, QExp> { &self.data }
+    pub fn new(outer_env: Option<&'a QEnv<'a>>, dir: PathBuf) -> Self {
+        return QEnv { data: HashMap::new(), outer: outer_env, dir };
+    }
+
+    pub fn default_with_dir(dir: PathBuf) -> Self {
+        return QEnv { dir, ..Self::default() };
+    }
+
+    pub fn symbols(&self) -> Vec<String> { self.data.keys().cloned().collect() }
+
+    pub fn len(&self) -> usize { self.data.len() }
+
+    pub fn is_empty(&self) -> bool { self.data.is_empty() }
+
+    pub fn get_data(&self) -> &HashMap<String, QEnvEntry<'a>> { &self.data }
 
     pub fn get_outer(&'a self) -> Option<&'a QEnv<'a>> {
         return (&self.outer).as_deref()
     }
 
-    pub fn get(&self, k: &str) -> Option<&QExp> {
-        return if let Some(exp) = self.data.get(k) {
-            Some(exp)
-        } else if let Some(outer) = &self.outer {
-            outer.get(k)
-        } else {
-            None
-        }
-    }
-
-    pub fn get_cloned(&self, k: &str) -> Option<QExp> {
-        return if let Some(exp) = self.data.get(k) {
-            Some(exp.clone())
-        } else if let Some(outer) = &self.outer {
-            outer.get_cloned(k)
+    fn get_path(&self, path: &[String]) -> Option<&QEnvEntry> {
+        return if let Some(sym) = path.first() {
+            match (self.data.get(sym), path.len() > 1) {
+                (Some(x), false) => Some(x),
+                (Some(QEnvEntry::Mod(m)), true) => m.get_path(&path[1..]),
+                (Some(QEnvEntry::Exp(_)), true) => None,
+                (None, _) => None,
+            }
         } else {
             None
         };
     }
 
-    pub fn get_ok(&self, k: &str) -> QResult<&QExp> {
-        return if let Some(exp) = self.data.get(k) {
-            Ok(exp)
+    fn get_path_ok(&self, path: &[String]) -> QResult<Option<&QEnvEntry>> {
+        return if let Some(sym) = path.first() {
+            match (self.data.get(sym), path.len() > 1) {
+                (Some(x), false) => Ok(Some(x)),
+                (Some(QEnvEntry::Mod(m)), true) => m.get_path_ok(&path[1..]),
+                (Some(QEnvEntry::Exp(_)), true) => {
+                    Err(qerr_fmt!("encountered non-module '{}' in path", sym))
+                },
+                (None, _) => Ok(None),
+            }
+        } else {
+            Err(qerr!("unexpected empty path"))
+        };
+    }
+
+    pub fn get(&self, k: &str) -> Option<&QEnvEntry> {
+        let path: Vec<String> = k.split("::").map(|s| s.to_string()).collect();
+        return if let Some(x) = self.get_path(&path) {
+            Some(x)
+        } else if let Some(outer) = &self.outer {
+            outer.get_path(&path)
+        } else {
+            None
+        };
+    }
+
+    pub fn get_ok(&self, k: &str) -> QResult<&QEnvEntry> {
+        let path: Vec<String> = k.split("::").map(|s| s.to_string()).collect();
+        return if let Some(x) = self.get_path_ok(&path)? {
+            Ok(x)
         } else if let Some(outer) = &self.outer {
             outer.get_ok(k)
         } else {
@@ -2895,18 +2998,107 @@ impl<'a> QEnv<'a> {
         };
     }
 
-    pub fn get_ok_cloned(&self, k: &str) -> QResult<QExp> {
-        return if let Some(exp) = self.data.get(k) {
-            Ok(exp.clone())
+    fn get_exp_path(&self, path: &[String]) -> Option<&QExp> {
+        return if let Some(sym) = path.first() {
+            match (self.data.get(sym), path.len() > 1) {
+                (Some(QEnvEntry::Exp(q)), false) => Some(q),
+                (Some(QEnvEntry::Mod(_)), false) => None,
+                (Some(QEnvEntry::Exp(_)), true) => None,
+                (Some(QEnvEntry::Mod(m)), true) => m.get_exp_path(&path[1..]),
+                (None, _) => None,
+            }
+        } else {
+            None
+        };
+    }
+
+    fn get_exp_path_ok(&self, path: &[String]) -> QResult<Option<&QExp>> {
+        return if let Some(sym) = path.first() {
+            match (self.data.get(sym), path.len() > 1) {
+                (Some(QEnvEntry::Exp(q)), false) => Ok(Some(q)),
+                (Some(QEnvEntry::Mod(_)), false) => {
+                    Err(qerr_fmt!(
+                        "module '{}' cannot be referenced directly", sym
+                    ))
+                },
+                (Some(QEnvEntry::Exp(_)), true) => {
+                    Err(qerr_fmt!("encountered non-module '{}' in path", sym))
+                },
+                (Some(QEnvEntry::Mod(m)), true)
+                    => m.get_exp_path_ok(&path[1..]),
+                (None, _) => Ok(None),
+                // (None, _) => Err(qerr_fmt!("symbol '{}' is undefined", sym)),
+            }
+        } else {
+            Err(qerr!("unexpected empty path"))
+        };
+    }
+
+    pub fn get_exp(&self, k: &str) -> Option<&QExp> {
+        let path: Vec<String> = k.split("::").map(|s| s.to_string()).collect();
+        return if let Some(exp) = self.get_exp_path(&path) {
+            Some(exp)
         } else if let Some(outer) = &self.outer {
-            outer.get_ok_cloned(k)
+            outer.get_exp_path(&path)
+        } else {
+            None
+        };
+    }
+
+    pub fn get_exp_cloned(&self, k: &str) -> Option<QExp> {
+        let path: Vec<String> = k.split("::").map(|s| s.to_string()).collect();
+        return if let Some(exp) = self.get_exp_path(&path) {
+            Some(exp.clone())
+        } else if let Some(outer) = &self.outer {
+            outer.get_exp_path(&path).cloned()
+        } else {
+            None
+        };
+    }
+
+    pub fn get_exp_ok(&self, k: &str) -> QResult<&QExp> {
+        let path: Vec<String> = k.split("::").map(|s| s.to_string()).collect();
+        return if let Some(exp) = self.get_exp_path_ok(&path)? {
+            Ok(exp)
+        } else if let Some(outer) = &self.outer {
+            outer.get_exp_ok(k)
         } else {
             Err(qerr_fmt!("symbol '{}' is undefined", k))
         };
     }
 
-    pub fn insert(&mut self, k: String, val: QExp) {
+    pub fn get_exp_ok_cloned(&self, k: &str) -> QResult<QExp> {
+        let path: Vec<String> = k.split("::").map(|s| s.to_string()).collect();
+        return if let Some(exp) = self.get_exp_path_ok(&path)? {
+            Ok(exp.clone())
+        } else if let Some(outer) = &self.outer {
+            outer.get_exp_ok_cloned(k)
+        } else {
+            Err(qerr_fmt!("symbol '{}' is undefined", k))
+        };
+    }
+
+    fn get_exp_env_of(&mut self, k: &str) -> QResult<QEnv> {
+        let mut path: std::collections::VecDeque<String>
+            = k.split("::").map(|s| s.to_string()).collect();
+        let mut env: QEnv = self.clone();
+        while let Some(sym) = path.pop_front() {
+            match (env.data.get(&sym), path.is_empty()) {
+                (Some(QEnvEntry::Mod(m)), false) => { env = m.clone(); },
+                (Some(QEnvEntry::Exp(_)), true) => { return Ok(env) },
+                _ => { return Err(qerr!("unexpected state in get_exp_env_of")); },
+            }
+        }
+        return Err(qerr!("unexpected state in get_exp_env_of"));
+    }
+
+    pub fn insert(&mut self, k: String, val: QEnvEntry<'a>) {
         self.data.insert(k, val);
+    }
+
+    pub fn remove(&mut self, k: &str) -> QResult<QEnvEntry<'a>> {
+        return self.data.remove(k)
+            .ok_or_else(|| qerr_fmt!("symbol '{}' is undefined", k));
     }
 
     pub fn eval(&mut self, exp: &QExp) -> QResult<QExp> {
@@ -2919,25 +3111,33 @@ impl<'a> QEnv<'a> {
                     match evalfirst {
                         qfunc!(_, f) => f(self, &list[1..]),
                         qlambda!(ll) => {
-                            let argvals: Vec<QExp>
-                                = self.eval_multi(&list[1..])?;
-                            ll.eval(self, &argvals)
+                            if let qsymbol!(s) = first {
+                                if s.contains("::") {
+                                    let mut evalenv: QEnv
+                                        = self.get_exp_env_of(s)?;
+                                    ll.eval(&mut evalenv, &list[1..])
+                                } else {
+                                    ll.eval(self, &list[1..])
+                                }
+                            } else {
+                                ll.eval(self, &list[1..])
+                            }
                         },
+                        // qlambda!(ll) => ll.eval(self, &list[1..]),
                         _ => {
                             let mut with_evalfirst: Vec<QExp> = vec![evalfirst];
                             with_evalfirst.append(
-                                &mut list.iter().skip(1).cloned().collect()
+                                &mut self.eval_multi(&list[1..])?
                             );
-                            Ok(qlist!(self.eval_multi(&with_evalfirst)?))
+                            Ok(qlist!(with_evalfirst))
+                            // Ok(qlist!(self.eval_multi(&with_evalfirst)?))
                         },
                     }
                 } else {
                     Ok(exp.clone())
                 }
             },
-            qsymbol!(k)
-                => self.get_cloned(k)
-                .ok_or_else(|| qerr_fmt!("symbol '{}' is undefined", k)),
+            qsymbol!(k) => self.get_exp_ok_cloned(k),
             qfunc!(_, _) => Ok(exp.clone()),
             qlambda!(_) => Ok(exp.clone()),
         };
