@@ -35,7 +35,7 @@ use crate::{
         convert_type_num,
         convert_numbers_sametype,
         typecast,
-        FormatX,
+        StrFmt,
     },
     repl::run_repl,
 };
@@ -447,7 +447,7 @@ pub fn fn_format(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     }?;
     let vals: Vec<QExp> = env.eval_multi(&args[1..])?;
     let formatted: String
-        = fmtstr.formatx(&vals)
+        = fmtstr.format(&vals)
         .map_err(|e| e.prepend_source("format"))?;
     return Ok(qstr!(formatted));
 }
@@ -462,7 +462,7 @@ pub fn fn_print(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     }?;
     let vals: Vec<QExp> = env.eval_multi(&args[1..])?;
     let formatted: String
-        = fmtstr.formatx(&vals)
+        = fmtstr.format(&vals)
         .map_err(|e| e.prepend_source("print"))?;
     print!("{}", formatted);
     std::io::Write::flush(&mut std::io::stdout()).unwrap();
@@ -483,7 +483,7 @@ pub fn fn_println(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     }?;
     let vals: Vec<QExp> = env.eval_multi(&args[1..])?;
     let formatted: String
-        = fmtstr.formatx(&vals)
+        = fmtstr.format(&vals)
         .map_err(|e| e.prepend_source("println"))?;
     println!("{}", formatted);
     std::io::Write::flush(&mut std::io::stdout()).unwrap();
@@ -504,7 +504,7 @@ pub fn fn_halt(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     }?;
     let vals: Vec<QExp> = env.eval_multi(&args[1..])?;
     let formatted: String
-        = fmtstr.formatx(&vals)
+        = fmtstr.format(&vals)
         .map_err(|e| e.prepend_source("halt"))?;
     return Err(qerr_fmt!("halt: {}", formatted));
 }
@@ -2232,9 +2232,11 @@ macro_rules! param_elementwise_fn(
     }
 );
 
-param_elementwise_fn!(fn_mod,  "mod",  0,  1,  modulo, qint!(),    qfloat!()  );
-param_elementwise_fn!(fn_log,  "log",  1,  0,  log,    qint!(),    qcomplex!());
-param_elementwise_fn!(fn_pow,  "pow",  0,  1,  pow,    qint!(),    qcomplex!());
+param_elementwise_fn!(fn_mod,   "mod",  0,  1,  modulo, qint!(),    qfloat!()  );
+param_elementwise_fn!(fn_log,   "log",  1,  0,  log,    qint!(),    qcomplex!());
+param_elementwise_fn!(fn_pow,   "pow",  0,  1,  pow,    qint!(),    qcomplex!());
+param_elementwise_fn!(fn_shl,   "shl",  0,  1,  shl,    qbool!(),   qint!()    );
+param_elementwise_fn!(fn_shr,   "shr",  0,  1,  shr,    qbool!(),   qint!()    );
 
 /*
  * list -> list math
@@ -2748,6 +2750,50 @@ pub fn phys_nmrgb(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         Ok(rgb.into_iter().next().unwrap())
     } else {
         Ok(qlist!(rgb))
+    };
+}
+
+pub fn phys_qraise(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    if args.len() != 2 {
+        return Err(qerr_fmt!(
+            "qraise: expected 2 args but got {}", args.len()));
+    }
+    let J: f64
+        = match convert_type_num(&env.eval(args.get(0).unwrap())?, qfloat!()) {
+            Ok(qfloat!(f)) => Ok(f),
+            _ => Err(qerr!("invalid type in qraise")),
+        }?;
+    let mJ: f64
+        = match convert_type_num(&env.eval(args.get(1).unwrap())?, qfloat!()) {
+            Ok(qfloat!(f)) => Ok(f),
+            _ => Err(qerr!("invalid type in qraise")),
+        }?;
+    return if (-J..=J).contains(&mJ) {
+        Ok(qfloat!(((J - mJ) * (J + mJ + 1.0)).sqrt()))
+    } else {
+        Ok(qfloat!(0.0))
+    };
+}
+
+pub fn phys_qlower(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    if args.len() != 2 {
+        return Err(qerr_fmt!(
+            "qlower: expected 2 args but got {}", args.len()));
+    }
+    let J: f64
+        = match convert_type_num(&env.eval(args.get(0).unwrap())?, qfloat!()) {
+            Ok(qfloat!(f)) => Ok(f),
+            _ => Err(qerr!("invalid type in qlower")),
+        }?;
+    let mJ: f64
+        = match convert_type_num(&env.eval(args.get(1).unwrap())?, qfloat!()) {
+            Ok(qfloat!(f)) => Ok(f),
+            _ => Err(qerr!("invalid type in qlower")),
+        }?;
+    return if (-J..=J).contains(&mJ) {
+        Ok(qfloat!(((J + mJ) * (J - mJ + 1.0)).sqrt()))
+    } else {
+        Ok(qfloat!(0.0))
     };
 }
 

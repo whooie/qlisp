@@ -874,7 +874,7 @@ q>> (fold 1 f (range 0 4)) ; evaluates to 9
             "Find the minimum of a list or str.",
 "
 Find the minimum of a list or str using the `<` function.
-Alias: `<<`
+Alias: `<:`
 
 Expected form:
 (min <list or str>)
@@ -889,7 +889,7 @@ q>> (min \"hello world\") ; evaluates to \" \"
             "Find the maximum of a list or str.",
 "
 Find the maximum of a list or str using the `>` function.
-Alias: `>>`
+Alias: `:>`
 
 Expected form:
 (max <list or str>)
@@ -2058,6 +2058,43 @@ q>> (pow (1 2 3 4) (1 2 3 4)) ; evaluates to (1 4 27 256)
 ",
         ),
 
+        "shl" => (
+            "Bit-shift left.",
+"
+Bit-shift left for single numbers or lists of numbers. Overflow is prevented by
+automatically reducing the shift size mod 64. Arguments must be bools, ints, or
+lists thereof.
+Alias: `<<`
+
+Expected form:
+(shl <value> <shift size>)
+
+Example:
+q>> (shl 1 7) ; evaluates to 128
+q>> (shl 1 (1 2 3 4 5)) ; evaluates to (2 4 8 16 32)
+q>> (shl (1 2 3 4 5) 2) ; evaluates to (4 8 12 16 20)
+q>> (shl (1 2 3 4 5) (1 2 3 4 5)) ; evaluates to (2 8 24 64 160)
+",
+        ),
+
+        "shr" => (
+            "Bit-shift right.",
+"
+Bit-shift right for single numbers or lists of numbers. Overflow is prevented by
+automatically reducing the shift size mod 64. Arguments must be bools, ints, or
+lists thereof.
+Alias: `>>`
+
+Expected form:
+(shr <value> <shift size>)
+
+Example:
+q>> (shr 128 7) ; evaluates to 1
+q>> (shr 128 (1 2 3 4 5)) ; evaluates to (64 32 16 8 4)
+q>> (shr (16 32 64 128 256) 2) ; evaluates to (4 8 16 32 64)
+q>> (shr (16 32 64 128 256) (4 5 6 7 8)) ; evaluates to (1 1 1 1 1)
+",
+        ),
 
 /*
  * list -> list math

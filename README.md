@@ -44,6 +44,7 @@ See [qlisp.vim][qlisp.vim] for basic syntax highlighting in Vim.
   environments for each call outside of an iterator routine (e.g. `map`)
 - the system for printing help text in the REPL is clunky
 - there's probably much more cloning than is absolutely necessary
+- ~~`formatx` doesn't support `e`/`E` formatting~~
 
 [risp]: https://stopa.io/post/222
 [quacs]: https://gitlab.com/whooie/quacs/-/tree/rustlib

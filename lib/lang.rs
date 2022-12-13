@@ -1,7 +1,10 @@
 use std::{
     cmp,
     collections::HashMap,
-    fmt,
+    fmt::{
+        self,
+        Write,
+    },
     mem,
     path::PathBuf,
     rc::Rc,
@@ -15,9 +18,9 @@ use num_traits::{
     One,
     Zero,
 };
-use formatx::{
-    self as fmtx,
-    formatx,
+use strfmt::{
+    self,
+    strfmt as strformat,
 };
 use crate::functions as fns;
 
@@ -116,8 +119,8 @@ pub const PROTECTED: &[&str] = &[
     // iterable accumulation
     "length",           "#",    // done
     "fold",             "@.",   // done
-    "min",              "<<",   // done
-    "max",              ">>",   // done
+    "min",              "<:",   // done
+    "max",              ":>",   // done
     "select-by",        "*@.",  // done
     // iterable slicing and access
     "get",              ".",    // done
@@ -194,6 +197,8 @@ pub const PROTECTED: &[&str] = &[
     "mod",              "%",    // done
     "log",                      // done
     "pow",              "**",   // done
+    "shl",              "<<",   // done
+    "shr",              ">>",   // done
     // list -> list math
     "convolve",         "<:>",  // done
     "hist",             "|#|",  // done
@@ -733,6 +738,44 @@ impl QExp {
         };
     }
 
+    pub fn shl(&self, sh: &QExp) -> QResult<QExp> {
+        let n_c: i64 = match convert_type_num(self, qint!()) {
+            Ok(qint!(i)) => Ok(i),
+            _ => Err(qerr!("invalid type in shl")),
+        }?;
+        let sh_c: u32
+            = match convert_type_num(sh, qint!()) {
+                Ok(qint!(i)) => {
+                    if i < 0 {
+                        Err(qerr!("shift size cannot be negative"))
+                    } else {
+                        Ok(i as u32)
+                    }
+                },
+                _ => Err(qerr!("invalid type in shl")),
+            }?;
+        return Ok(qint!(n_c.overflowing_shl(sh_c).0));
+    }
+
+    pub fn shr(&self, sh: &QExp) -> QResult<QExp> {
+        let n_c: i64 = match convert_type_num(self, qint!()) {
+            Ok(qint!(i)) => Ok(i),
+            _ => Err(qerr!("invalid type in shr")),
+        }?;
+        let sh_c: u32
+            = match convert_type_num(sh, qint!()) {
+                Ok(qint!(i)) => {
+                    if i < 0 {
+                        Err(qerr!("shift size cannot be negative"))
+                    } else {
+                        Ok(i as u32)
+                    }
+                },
+                _ => Err(qerr!("invalid type in shr")),
+            }?;
+        return Ok(qint!(n_c.overflowing_shr(sh_c).0));
+    }
+
     pub fn equals(&self, rhs: &QExp) -> bool {
         // let ty: QExpType = cmp::max(self.exp_type(), rhs.exp_type());
         // let lhs_c: QExp = match convert_type(self, ty) {
@@ -1148,6 +1191,123 @@ impl fmt::Display for QExp {
         };
     }
 }
+
+impl strfmt::DisplayStr for QExp {
+    fn display_str(&self, f: &mut strfmt::Formatter<'_, '_>)
+        -> strfmt::Result<()>
+    {
+        return (&self).display_str(f)
+    }
+}
+
+impl strfmt::DisplayStr for &QExp {
+    fn display_str(&self, f: &mut strfmt::Formatter<'_, '_>)
+        -> strfmt::Result<()>
+    {
+        return match self {
+            qbool!(x) => {
+                if *x {
+                    write!(f, "true")
+                        .map_err(|_| strfmt::FmtError::Invalid(
+                            "invalid write".to_string()
+                        ))
+                } else {
+                    write!(f, "false")
+                        .map_err(|_| strfmt::FmtError::Invalid(
+                            "invalid write".to_string()
+                        ))
+                }
+            },
+            qint!(x) => (*x).display_str(f),
+            qfloat!(x) => (*x).display_str(f),
+            qcomplex!(x) => {
+                x.re.display_str(f)?;
+                match f.sign() {
+                    strfmt::Sign::Unspecified
+                    | strfmt::Sign::Minus
+                    | strfmt::Sign::Space
+                        => {
+                            if x.im >= 0.0 {
+                                write!(f, "+")
+                                    .map_err(|_| strfmt::FmtError::Invalid(
+                                        "invalid write".to_string()
+                                    ))?;
+                            }
+                            x.im.display_str(f)?;
+                        },
+                    strfmt::Sign::Plus => { x.im.display_str(f)?; },
+                }
+                write!(f, "i")
+                    .map_err(|_| strfmt::FmtError::Invalid(
+                        "invalid write".to_string()
+                    ))
+            },
+            qlist!(x) => {
+                let n: usize = x.len();
+                write!(f, "(")
+                    .map_err(|_| strfmt::FmtError::Invalid(
+                            "invalid write".to_string()
+                    ))?;
+                for (k, xk) in x.iter().enumerate() {
+                    match xk {
+                        qstr!(s) => {
+                            write!(f, "\"")
+                                .map_err(|_| strfmt::FmtError::Invalid(
+                                    "invalid write".to_string()
+                                ))?;
+                            s.display_str(f)?;
+                            write!(f, "\"")
+                                .map_err(|_| strfmt::FmtError::Invalid(
+                                    "invalid write".to_string()
+                                ))?;
+                        },
+                        _ => { xk.display_str(f)?; },
+                    }
+                    if k < n - 1 {
+                        write!(f, ", ")
+                            .map_err(|_| strfmt::FmtError::Invalid(
+                                "invalid write".to_string()
+                            ))?;
+                    }
+                }
+                write!(f, ")")
+                    .map_err(|_| strfmt::FmtError::Invalid(
+                        "invalid write".to_string()
+                    ))
+            },
+            qstr!(x) => x.display_str(f),
+            qsymbol!(x) => write!(f, "{}", x)
+                .map_err(|_| strfmt::FmtError::Invalid(
+                    "invalid write".to_string()
+                )),
+            qfunc!(name, _) => write!(f, "func <{}> {{ ... }}", name)
+                .map_err(|_| strfmt::FmtError::Invalid(
+                    "invalid write".to_string()
+                )),
+            qlambda!(x) => {
+                let n: usize = x.arg_pattern.as_ref().len();
+                write!(f, "lambda (")
+                    .map_err(|_| strfmt::FmtError::Invalid(
+                        "invalid write".to_string()
+                    ))?;
+                for (k, sk) in x.arg_pattern.as_ref().iter().enumerate() {
+                    sk.display_str(f)?;
+                    if k < n - 1 {
+                        write!(f, ", ")
+                            .map_err(|_| strfmt::FmtError::Invalid(
+                                "invalid write".to_string()
+                            ))?;
+                    }
+                }
+                write!(f, ") {{ ... }}")
+                    .map_err(|_| strfmt::FmtError::Invalid(
+                        "invalid write".to_string()
+                    ))
+            },
+        };
+    }
+}
+
 
 #[derive(Clone)]
 pub struct QLambda {
@@ -2800,8 +2960,8 @@ impl<'a> Default for QEnv<'a> {
         // iterable accumulation
         add_fn!(env, "length",          "#",    fns::fn_length          );
         add_fn!(env, "fold",            "@.",   fns::fn_fold            );
-        add_fn!(env, "min",             "<<",   fns::fn_min             );
-        add_fn!(env, "max",             ">>",   fns::fn_max             );
+        add_fn!(env, "min",             "<:",   fns::fn_min             );
+        add_fn!(env, "max",             ":>",   fns::fn_max             );
         add_fn!(env, "select-by",       "*@.",  fns::fn_select_by       );
         // iterable slicing and access
         add_fn!(env, "get",             ".",    fns::fn_get             );
@@ -2878,6 +3038,8 @@ impl<'a> Default for QEnv<'a> {
         add_fn!(env, "mod",             "%",    fns::fn_mod             );
         add_fn!(env, "log",                     fns::fn_log             );
         add_fn!(env, "pow",             "**",   fns::fn_pow             );
+        add_fn!(env, "shl",             "<<",   fns::fn_shl             );
+        add_fn!(env, "shr",             ">>",   fns::fn_shr             );
         // list -> list math
         add_fn!(env, "convolve",        "<:>",  fns::fn_convolve        );
         add_fn!(env, "hist",            "|#|",  fns::fn_histogram       );
@@ -2920,7 +3082,9 @@ impl<'a> Default for QEnv<'a> {
         add_float!(phys,    "uN",       5.050783699e-27         );
         add_float!(phys,    "Eh",       4.3597447222071e-18     );
         add_float!(phys,    "amu",      1.66053906660e-27       );
-        add_fn!(phys, "nmrgb", fns::phys_nmrgb);
+        add_fn!(phys,   "nmrgb",    fns::phys_nmrgb );
+        add_fn!(phys,   "qraise",   fns::phys_qraise);
+        add_fn!(phys,   "qlower",   fns::phys_qlower);
         add_mod!(env, "phys", phys);
 
         return QEnv { data: env, outer: None, dir: PathBuf::from(".") };
@@ -3178,19 +3342,49 @@ impl<'a> QEnv<'a> {
     }
 }
 
-pub trait FormatX {
-    fn formatx(&self, vals: &[QExp]) -> QResult<String>;
+pub trait StrFmt {
+    fn format(&self, vals: &[QExp]) -> QResult<String>;
 }
 
-impl FormatX for String {
-    fn formatx(&self, vals: &[QExp]) -> QResult<String> {
-        let mut fmt: fmtx::Template
-            = formatx!(self)
-            .map_err(|e| qerr_fmt!("invalid format string: {}", e.message()))?;
-        vals.iter()
-            .for_each(|qk| fmt.replace_positional(qk));
-        return fmt.text()
-            .map_err(|e| qerr_fmt!("could not format string: {}", e.message()));
+impl StrFmt for String {
+    fn format(&self, vals: &[QExp]) -> QResult<String> {
+        let mut chars = self.chars().peekable();
+        let mut fmtstr = String::new();
+        let mut counter: usize = 0;
+        while let Some(chr) = chars.next() {
+            match chr {
+                '{' => {
+                    if let Some(next_chr) = chars.peek() {
+                        if next_chr == &'{' {
+                            fmtstr.push(chr);
+                            fmtstr.push(chars.next().unwrap());
+                        } else {
+                            fmtstr.push(chr);
+                            fmtstr.push_str(&format!("{}", counter));
+                            counter += 1;
+                        }
+                    } else {
+                        fmtstr.push(chr);
+                    }
+                },
+                _ => { fmtstr.push(chr); },
+            }
+        }
+        if vals.len() < counter {
+            return Err(qerr_fmt!(
+                "invalid format string: {} position{} but only {} value{}",
+                counter,
+                if counter > 1 { "s" } else { "" },
+                vals.len(),
+                if vals.len() > 1 { "s" } else { "" }
+            ));
+        }
+        let vals_map: HashMap<String, &QExp>
+            = vals.iter().enumerate()
+            .map(|(k, q)| (format!("{}", k), q))
+            .collect();
+        return strformat(&fmtstr, &vals_map)
+            .map_err(|e| qerr_fmt!("invalid format string: {}", e));
     }
 }
 
