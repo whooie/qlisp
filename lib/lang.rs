@@ -44,7 +44,7 @@ impl QErr {
 #[macro_export]
 macro_rules! qerr(
     ( $reason:literal ) => {
-        QErr::Reason($reason.to_string())
+        QErr::Reason($reason.into())
     }
 );
 
@@ -60,12 +60,67 @@ pub const FILE_EXTENSIONS: &[&str] = &[
     "qlsp",
 ];
 
+pub const CONSTS: &[&str] = &[
+    "PI", "2PI", "iPI", "i2PI",
+    "E",
+    "SQRT2", "1/SQRT2", "i/SQRT2",
+];
+
+pub const KEYWORDS: &[&str] = &[
+    "def",              ":=",
+    "let",              "*:=",
+    "fn",               "@:",
+    "defn",             "@:=",
+    "if",
+    "module",
+    "use",
+    "use-all",          "use*",
+    "interact",
+    "isdef",            "?:=",
+    "del",              "!-",
+];
+
+pub const OPERATORS: &[&str] = &[
+    "add",              "+",
+    "sub",              "-",
+    "mul",              "*",
+    "div",              "/",
+    "idiv",             "//",
+    "and",              "&&",
+    "or",               "||",
+    "xor",              "^",
+    "eq",               "=",
+    "neq",              "!=",
+    "gt",               ">",
+    "geq",              ">=",
+    "lt",               "<",
+    "leq",              "<=",
+    "mod",              "%",
+    "pow",              "**",
+    "shl",              "<<",
+    "shr",              ">>",
+];
+
+pub const TYPES: &[&str] = &[
+    "bool",
+    "int",
+    "float",
+    "complex",
+    "list",
+    "str",
+];
+
+pub const SPECIAL: &[&str] = &[
+    "interact",
+];
+
 pub const PROTECTED: &[&str] = &[
     // constants
     "PI", "2PI", "iPI", "i2PI",
     "E",
-    "inf", "inF", "iNf", "iNF", "Inf", "InF", "INf", "INF",
-    "nan", "naN", "nAn", "nAN", "Nan", "NaN", "NAn", "NAN",
+    "SQRT2", "1/SQRT2", "i/SQRT2",
+    // "inf", "inF", "iNf", "iNF", "Inf", "InF", "INf", "INF",
+    // "nan", "naN", "nAn", "nAN", "Nan", "NaN", "NAn", "NAN",
     // special -- keyword-like
     "def",              ":=",   // done
     "let",              "*:=",  // done
@@ -2683,7 +2738,7 @@ pub fn typecast(ty: QExpType, args: &[QExp]) -> QResult<QExp> {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum TokenState {
+pub enum TokenState {
     Normal = 0,
     InComment = 1,
     InString = 2,
@@ -2716,7 +2771,7 @@ pub fn tokenize(input: String) -> QResult<Vec<String>> {
                     }
                     ret.push(x.to_string());
                 },
-                ' ' | ',' | '\n' => {
+                ' ' | ',' | '\n' | '\t' => {
                     if !term.is_empty() {
                         ret.push(mem::take(&mut term));
                     }
@@ -2750,7 +2805,11 @@ pub fn tokenize(input: String) -> QResult<Vec<String>> {
                     'r' => { term.push('\r'); },
                     't' => { term.push('\t'); },
                     '\n' => { term.push(' '); },
-                    _ => { term.push(x); },
+                    _ => {
+                        return Err(qerr_fmt!(
+                            "unknown escape sequence \\{}", x
+                        ));
+                    },
                 }
                 state = TokenState::InString;
             },
@@ -2764,6 +2823,9 @@ pub fn tokenize(input: String) -> QResult<Vec<String>> {
 }
 
 pub fn parse(tokens: &[String]) -> QResult<Vec<QExp>> {
+    if tokens.is_empty() {
+        return Ok(vec![]);
+    }
     let mut exps: Vec<QExp> = Vec::new();
     let mut rest: &[String] = tokens;
     loop {
@@ -2814,6 +2876,9 @@ pub fn parse_atom(token: &str) -> QResult<QExp> {
         "E" => Ok(qfloat!(std::f64::consts::E)),
         "SQRT2" => Ok(qfloat!(std::f64::consts::SQRT_2)),
         "1/SQRT2" => Ok(qfloat!(std::f64::consts::FRAC_1_SQRT_2)),
+        "i/SQRT2" => Ok(qcomplex!(
+            C64 { re: 0.0, im: std::f64::consts::FRAC_1_SQRT_2 }
+        )),
         _ => {
             if let Ok(b) = bool::from_str(token) {
                 Ok(qbool!(b))

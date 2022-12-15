@@ -1,6 +1,26 @@
-use std::borrow::Cow;
+use std::{
+    borrow::Cow,
+    mem,
+    str::FromStr,
+};
+use crossterm::event::{
+    Event as CTEvent,
+    KeyEvent,
+    KeyCode,
+    KeyModifiers as KeyMod,
+    // MouseEvent,
+    // MouseEventKind,
+};
+use nu_ansi_term::{
+    Style,
+    Color,
+};
+use num_complex::Complex64 as C64;
 use phf::phf_map;
-use reedline as reed;
+use reedline::{
+    self as reed,
+    ReedlineEvent as RLEvent,
+};
 use crate::{
     qerr,
     qerr_fmt,
@@ -9,6 +29,11 @@ use crate::{
     qstr,
     qsymbol,
     lang::{
+        CONSTS,
+        KEYWORDS,
+        OPERATORS,
+        TYPES,
+        SPECIAL,
         PROTECTED,
         QResult,
         QErr,
@@ -16,6 +41,7 @@ use crate::{
         QEnv,
         QEnvEntry,
         tokenize,
+        TokenState,
         parse,
     },
 };
@@ -2686,7 +2712,7 @@ Available topics:"
 pub struct QPrompt { }
 
 impl reed::Prompt for QPrompt {
-    fn render_prompt_left(&self) -> Cow<str> { Cow::from("q") }
+    fn render_prompt_left(&self) -> Cow<str> { Cow::from("") }
 
     fn render_prompt_right(&self) -> Cow<str> { Cow::from("") }
 
@@ -2694,13 +2720,13 @@ impl reed::Prompt for QPrompt {
         -> Cow<str>
     {
         return match prompt_mode {
-            reed::PromptEditMode::Default => Cow::from(">> "),
-            reed::PromptEditMode::Emacs => Cow::from(">> "),
+            reed::PromptEditMode::Default => Cow::from("q>> "),
+            reed::PromptEditMode::Emacs => Cow::from("q>> "),
             reed::PromptEditMode::Vi(vimode) => match vimode {
-                    reed::PromptViMode::Normal => Cow::from("|> "),
-                    reed::PromptViMode::Insert => Cow::from(">> "),
+                    reed::PromptViMode::Normal => Cow::from("q|> "),
+                    reed::PromptViMode::Insert => Cow::from("q>> "),
             },
-            reed::PromptEditMode::Custom(_) => Cow::from("c> "),
+            reed::PromptEditMode::Custom(_) => Cow::from("q>> "),
         };
     }
 
@@ -2717,8 +2743,500 @@ impl reed::Prompt for QPrompt {
     }
 }
 
+pub struct QHighlighter { }
+
+impl QHighlighter {
+    pub fn new() -> Self { Self { } }
+}
+
+macro_rules! hi_style {
+    ( $fg:expr, $bg:expr ) => {
+        Style {
+            foreground: $fg,
+            background: $bg,
+            is_bold: false,
+            is_dimmed: false,
+            is_italic: false,
+            is_underline: false,
+            is_blink: false,
+            is_reverse: false,
+            is_hidden: false,
+            is_strikethrough: false,
+        }
+    };
+    ( $fg:expr, $bg:expr, bold ) => {
+        Style {
+            foreground: $fg,
+            background: $bg,
+            is_bold: true,
+            is_dimmed: false,
+            is_italic: false,
+            is_underline: false,
+            is_blink: false,
+            is_reverse: false,
+            is_hidden: false,
+            is_strikethrough: false,
+        }
+    };
+    ( $fg:expr, $bg:expr, dimmed ) => {
+        Style {
+            foreground: $fg,
+            background: $bg,
+            is_bold: false,
+            is_dimmed: true,
+            is_italic: false,
+            is_underline: false,
+            is_blink: false,
+            is_reverse: false,
+            is_hidden: false,
+            is_strikethrough: false,
+        }
+    };
+}
+const HI_KEYWORD: Style = hi_style!(Some(Color::LightRed), None);
+const HI_OPERATOR: Style = hi_style!(Some(Color::LightRed), None);
+const HI_TYPE: Style = hi_style!(Some(Color::White), None, bold);
+const HI_SPECIAL: Style = hi_style!(Some(Color::LightMagenta), None);
+const HI_CONST: Style = hi_style!(Some(Color::White), None, bold);
+const HI_BUILTIN: Style = hi_style!(Some(Color::LightCyan), None);
+const HI_STRING: Style = hi_style!(Some(Color::LightYellow), None);
+const HI_STRING_ESCAPE: Style = hi_style!(Some(Color::LightCyan), None);
+const HI_NUMBER: Style = hi_style!(Some(Color::LightBlue), None);
+const HI_COMMA: Style = hi_style!(Some(Color::White), None, dimmed);
+const HI_COMMENT: Style = hi_style!(Some(Color::White), None, dimmed);
+const HI_PATHSEP: Style = hi_style!(Some(Color::Cyan), None, bold);
+const HI_INVALID: Style = hi_style!(Some(Color::White), Some(Color::LightRed), bold);
+macro_rules! hi_paren_style {
+    ( $r:expr, $g:expr, $b:expr ) => {
+        Style {
+            foreground: Some(Color::Rgb($r, $g, $b)),
+            background: None,
+            is_bold: true,
+            is_dimmed: false,
+            is_italic: false,
+            is_underline: false,
+            is_blink: false,
+            is_reverse: false,
+            is_hidden: false,
+            is_strikethrough: false,
+        }
+    }
+}
+const HI_PAREN: [Style; 8] = [
+    hi_paren_style!(255, 255, 255),
+    hi_paren_style!(255, 236, 214),
+    hi_paren_style!(255, 215, 170),
+    hi_paren_style!(255, 181, 112),
+    hi_paren_style!(226, 145,  90),
+    hi_paren_style!(175, 117, 105),
+    hi_paren_style!(120,  95, 115),
+    hi_paren_style!( 79,  89, 124),
+];
+const PLEVEL_MAX: usize = 8;
+
+pub fn push_normal(
+    acc: &mut Vec<(Style, String)>,
+    term_style: &mut Style,
+    term: &mut String,
+) {
+    if !term.is_empty() {
+        match term.as_ref() {
+            "i" | "-i" => {
+                acc.push((mem::take(term_style), mem::take(term)));
+            },
+            _ => {
+                if CONSTS.contains(&term.as_ref()) {
+                    acc.push((HI_CONST, mem::take(term)));
+                } else if KEYWORDS.contains(&term.as_ref()) {
+                    acc.push((HI_KEYWORD, mem::take(term)));
+                } else if OPERATORS.contains(&term.as_ref()) {
+                    acc.push((HI_OPERATOR, mem::take(term)));
+                } else if TYPES.contains(&term.as_ref()) {
+                    acc.push((HI_TYPE, mem::take(term)));
+                } else if SPECIAL.contains(&term.as_ref()) {
+                    acc.push((HI_SPECIAL, mem::take(term)));
+                } else if PROTECTED.contains(&term.as_ref()) {
+                    acc.push((HI_BUILTIN, mem::take(term)));
+                } else if let Ok(_) = bool::from_str(term) {
+                    acc.push((HI_NUMBER, mem::take(term)));
+                } else if let Ok(_) = i64::from_str(term) {
+                    acc.push((HI_NUMBER, mem::take(term)));
+                } else if let Ok(_) = f64::from_str(term) {
+                    acc.push((HI_NUMBER, mem::take(term)));
+                } else if let Ok(_) = C64::from_str(term) {
+                    acc.push((HI_NUMBER, mem::take(term)));
+                } else {
+                    if term.contains("::") {
+                        let style: Style = mem::take(term_style);
+                        let pathelems: Vec<String>
+                            = mem::take(term).split("::")
+                            .map(|s| s.to_string())
+                            .collect();
+                        let n: usize = pathelems.len();
+                        pathelems.into_iter()
+                            .enumerate()
+                            .for_each(|(k, s)| {
+                                if CONSTS.contains(&s.as_ref()) {
+                                    acc.push((HI_CONST, s));
+                                } else if KEYWORDS.contains(&s.as_ref()) {
+                                    acc.push((HI_KEYWORD, s));
+                                } else if OPERATORS.contains(&s.as_ref()) {
+                                    acc.push((HI_OPERATOR, s));
+                                } else if TYPES.contains(&s.as_ref()) {
+                                    acc.push((HI_TYPE, s));
+                                } else if SPECIAL.contains(&s.as_ref()) {
+                                    acc.push((HI_SPECIAL, s));
+                                } else if PROTECTED.contains(&s.as_ref()) {
+                                    acc.push((HI_BUILTIN, s));
+                                } else {
+                                    acc.push((style, s));
+                                }
+                                if k < n - 1 {
+                                    acc.push((HI_PATHSEP, "::".into()));
+                                }
+                            });
+                    } else {
+                        acc.push((mem::take(term_style), mem::take(term)));
+                    }
+                }
+            }
+        }
+    }
+    *term_style = Style::default();
+}
+
+impl reed::Highlighter for QHighlighter {
+    fn highlight(&self, line: &str, cursor: usize) -> reed::StyledText {
+        if line.is_empty() {
+            return reed::StyledText { buffer: vec![] };
+        }
+        let mut state = TokenState::Normal;
+        let mut plevel: usize = 0;
+        let mut ret: Vec<(Style, String)> = Vec::new();
+        let mut term: String = String::new();
+        let mut term_style = Style::default();
+        let L: String = line.to_string() + " ";
+        let n: usize = L.len();
+
+        let mut paren_score: isize = 0;
+        let cursor_paren_l: Option<usize> = {
+            let mut k: usize = cursor;
+            if &L[k..k + 1] == ")" { paren_score = 1; }
+            loop {
+                match &L[k..k + 1] {
+                    ")" => { paren_score -= 1; },
+                    "(" => { paren_score += 1; },
+                    _ => { },
+                }
+                if paren_score == 1 {
+                    break Some(k);
+                }
+                if k == 0 {
+                    break None;
+                }
+                k -= 1;
+            }
+        };
+        paren_score = 0;
+        let cursor_paren_r: Option<usize> = {
+            let mut k: usize = cursor;
+            if &L[k..k + 1] == "(" { paren_score = 1; }
+            loop {
+                match &L[k..k + 1] {
+                    "(" => { paren_score -= 1; },
+                    ")" => { paren_score += 1; },
+                    _ => { },
+                }
+                if paren_score == 1 {
+                    break Some(k);
+                }
+                if k == n - 1 {
+                    break None;
+                }
+                k += 1;
+            }
+        };
+
+        for (k, x) in L.chars().enumerate() {
+            match state {
+                TokenState::Normal => match x {
+                    ';' => {
+                        push_normal(&mut ret, &mut term_style, &mut term);
+                        state = TokenState::InComment;
+                        term_style = HI_COMMENT;
+                        term.push(x);
+                    },
+                    '"' => {
+                        push_normal(&mut ret, &mut term_style, &mut term);
+                        state = TokenState::InString;
+                        term_style = HI_STRING;
+                        term.push(x);
+                    },
+                    '(' | ')' => {
+                        push_normal(&mut ret, &mut term_style, &mut term);
+                        term_style
+                            = if x == ')' {
+                                if plevel == 0 {
+                                    HI_INVALID
+                                } else {
+                                    HI_PAREN[(plevel - 1) % PLEVEL_MAX]
+                                }
+                            } else {
+                                HI_PAREN[plevel % PLEVEL_MAX]
+                            };
+                        if Some(k) == cursor_paren_l
+                            || Some(k) == cursor_paren_r
+                        {
+                            term_style.foreground = Some(Color::LightCyan);
+                        }
+                        ret.push((
+                            mem::take(&mut term_style),
+                            x.to_string(),
+                        ));
+                        plevel = if x == '(' {
+                            plevel.checked_add(1).unwrap_or(usize::MAX)
+                        } else {
+                            plevel.checked_sub(1).unwrap_or(0)
+                        }
+                    },
+                    ' ' | ',' | '\n' | '\t' => {
+                        push_normal(&mut ret, &mut term_style, &mut term);
+                        if x == ',' {
+                            term_style = HI_COMMA;
+                        } else {
+                            term_style = Style::default();
+                        }
+                        ret.push((
+                            mem::take(&mut term_style),
+                            x.to_string(),
+                        ));
+                    },
+                    _ => {
+                        term.push(x);
+                    },
+                },
+                TokenState::InComment => match x {
+                    '\n' => {
+                        push_normal(&mut ret, &mut term_style, &mut term);
+                        ret.push((Style::default(), x.to_string()));
+                        state = TokenState::Normal;
+                    },
+                    _ => { term.push(x); },
+                },
+                TokenState::InString => match x {
+                    '"' => {
+                        term.push(x);
+                        ret.push((
+                            mem::take(&mut term_style),
+                            mem::take(&mut term),
+                        ));
+                        state = TokenState::Normal;
+                    },
+                    '\\' => {
+                        ret.push((
+                            mem::take(&mut term_style),
+                            mem::take(&mut term),
+                        ));
+                        state = TokenState::StringEscape;
+                        term_style = HI_STRING_ESCAPE;
+                        term.push(x);
+                    },
+                    _ => { term.push(x); },
+                },
+                TokenState::StringEscape => {
+                    match x {
+                        '"' | '\\' | 'n' | 'r' | 't' => { term.push(x); },
+                        '\n' => { term.push(' '); },
+                        _ => {
+                            term.push(x);
+                            term_style = HI_INVALID;
+                        },
+                    }
+                    push_normal(&mut ret, &mut term_style, &mut term);
+                    state = TokenState::InString;
+                    term_style = HI_STRING;
+                },
+            }
+        }
+        push_normal(&mut ret, &mut term_style, &mut term);
+        return reed::StyledText { buffer: ret };
+    }
+}
+
+pub struct QEditMode { }
+
+impl QEditMode {
+    pub fn new() -> Self { Self { } }
+}
+
+impl reed::EditMode for QEditMode {
+    fn parse_event(&mut self, event: CTEvent) -> RLEvent {
+        return match event {
+            CTEvent::Key(
+                KeyEvent { code, modifiers }
+            ) => match (code, modifiers) {
+                (KeyCode::Char(c), KeyMod::NONE) => {
+                    RLEvent::Edit(vec![
+                        reed::EditCommand::InsertChar(c.to_ascii_lowercase())
+                    ])
+                },
+                (KeyCode::Char(c), KeyMod::SHIFT) => {
+                    RLEvent::Edit(vec![
+                        reed::EditCommand::InsertChar(c.to_ascii_uppercase())
+                    ])
+                },
+                (KeyCode::Char('c'), KeyMod::CONTROL) => {
+                    RLEvent::CtrlC
+                },
+                (KeyCode::Char('d'), KeyMod::CONTROL) => {
+                    RLEvent::CtrlD
+                },
+                (KeyCode::Char('a'), KeyMod::CONTROL) => {
+                    RLEvent::Edit(vec![
+                        reed::EditCommand::MoveToStart
+                    ])
+                },
+                (KeyCode::Char('e'), KeyMod::CONTROL) => {
+                    RLEvent::Edit(vec![
+                        reed::EditCommand::MoveToEnd
+                    ])
+                },
+                (KeyCode::Char('r'), KeyMod::CONTROL) => {
+                    RLEvent::SearchHistory
+                },
+                (KeyCode::Char('l'), KeyMod::CONTROL) => {
+                    RLEvent::ClearScreen
+                },
+                (KeyCode::Char('l'), keymod) => {
+                    if keymod == KeyMod::CONTROL | KeyMod::SHIFT {
+                        RLEvent::ClearScrollback
+                    } else {
+                        RLEvent::None
+                    }
+                },
+                (KeyCode::Left, KeyMod::NONE) => {
+                    RLEvent::Left
+                },
+                (KeyCode::Right, KeyMod::NONE) => {
+                    RLEvent::Right
+                },
+                (KeyCode::Char('b'), keymod) => {
+                    if keymod == KeyMod::ALT | KeyMod::SHIFT {
+                        RLEvent::Edit(vec![
+                            reed::EditCommand::MoveBigWordLeft
+                        ])
+                    } else if keymod == KeyMod::ALT {
+                        RLEvent::Edit(vec![
+                            reed::EditCommand::MoveWordLeft
+                        ])
+                    } else {
+                        RLEvent::None
+                    }
+                },
+                (KeyCode::Char('w'), keymod) => {
+                    if keymod == KeyMod::ALT | KeyMod::SHIFT {
+                        RLEvent::Edit(vec![
+                            reed::EditCommand::MoveBigWordRightStart
+                        ])
+                    } else if keymod == KeyMod::ALT {
+                        RLEvent::Edit(vec![
+                            reed::EditCommand::MoveWordRightStart
+                        ])
+                    } else {
+                        RLEvent::None
+                    }
+                },
+                (KeyCode::Char('e'), keymod) => {
+                    if keymod == KeyMod::ALT | KeyMod::SHIFT {
+                        RLEvent::Edit(vec![
+                            reed::EditCommand::MoveBigWordRightEnd
+                        ])
+                    } else if keymod == KeyMod::ALT {
+                        RLEvent::Edit(vec![
+                            reed::EditCommand::MoveWordRightEnd
+                        ])
+                    } else {
+                        RLEvent::None
+                    }
+                },
+                (KeyCode::Up, KeyMod::NONE) => {
+                    RLEvent::Up
+                },
+                (KeyCode::Down, KeyMod::NONE) => {
+                    RLEvent::Down
+                },
+                (KeyCode::Enter, KeyMod::NONE) => {
+                    RLEvent::Enter
+                },
+                (KeyCode::Enter, KeyMod::SHIFT) => {
+                    RLEvent::Edit(vec![
+                        reed::EditCommand::InsertChar('\n')
+                    ])
+                },
+                (KeyCode::Enter, KeyMod::CONTROL) => {
+                    RLEvent::Submit
+                },
+                (KeyCode::Backspace, KeyMod::NONE) => {
+                    RLEvent::Edit(vec![
+                        reed::EditCommand::Backspace
+                    ])
+                },
+                (KeyCode::Backspace, KeyMod::CONTROL) => {
+                    RLEvent::Edit(vec![
+                        reed::EditCommand::BackspaceWord
+                    ])
+                },
+                (KeyCode::Delete, KeyMod::NONE) => {
+                    RLEvent::Edit(vec![
+                        reed::EditCommand::Delete
+                    ])
+                },
+                (KeyCode::Delete, KeyMod::CONTROL) => {
+                    RLEvent::Edit(vec![
+                        reed::EditCommand::DeleteWord
+                    ])
+                },
+                (KeyCode::Home, KeyMod::NONE) => {
+                    RLEvent::Edit(vec![
+                        reed::EditCommand::MoveToLineStart
+                    ])
+                },
+                (KeyCode::End, KeyMod::NONE) => {
+                    RLEvent::Edit(vec![
+                        reed::EditCommand::MoveToLineEnd
+                    ])
+                },
+                (KeyCode::Esc, KeyMod::NONE) => {
+                    RLEvent::Esc
+                },
+                (KeyCode::Tab, KeyMod::NONE) => {
+                    RLEvent::Edit(vec![
+                        reed::EditCommand::InsertChar('\t'),
+                    ])
+                },
+                _ => RLEvent::None,
+            },
+            // Event::Mouse(
+            //     MouseEvent { kind, column, row, modifiers }
+            // ) => match (kind, column, row, modifiers) {
+            //     _ => RLEvent::None,
+            // },
+            CTEvent::Mouse(_) => RLEvent::None,
+            CTEvent::Resize(n, m) => RLEvent::Resize(n, m),
+        };
+    }
+
+    fn edit_mode(&self) -> reed::PromptEditMode {
+        return reed::PromptEditMode::Custom("QEM".into());
+    }
+}
+
 pub fn run_repl(env: &mut QEnv) {
-    let mut line_editor = reed::Reedline::create();
+    let mut line_editor
+        = reed::Reedline::create()
+        .with_validator(Box::new(reed::DefaultValidator))
+        .with_highlighter(Box::new(QHighlighter::new()))
+        .with_edit_mode(Box::new(QEditMode::new()));
     let prompt = QPrompt { };
     println!(
         "Welcome to the QLisp interpreter REPL. Type `(help)` for more \
