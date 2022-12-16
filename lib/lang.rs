@@ -3,10 +3,18 @@ use std::{
     collections::HashMap,
     fmt::{
         self,
-        Write,
+        Write as FmtWrite,
     },
+    fs::{
+        self,
+        File,
+    },
+    io::Write as IOWrite,
     mem,
-    path::PathBuf,
+    path::{
+        Path,
+        PathBuf,
+    },
     rc::Rc,
     str::FromStr,
 };
@@ -75,7 +83,6 @@ pub const KEYWORDS: &[&str] = &[
     "module",
     "use",
     "use-all",          "use*",
-    "interact",
     "isdef",            "?:=",
     "del",              "!-",
 ];
@@ -137,6 +144,14 @@ pub const PROTECTED: &[&str] = &[
     "format",           "$",    // done
     "print",            "$-",   // done
     "println",          "$_",   // done
+    "read",             "$<",   //
+    "readlines",        "$<:",  //
+    "with-file",        "$|",   //
+    "with-file-add",    "$|+",  //
+    "write",            "$>-",  //
+    "writeln",          "$>_",  //
+    "write-flush",      "$>>-", //
+    "writeln-flush",    "$>>_", //
     "halt",             "!!",   // done
     "istype",           "~?",   // done
     "type",             "?~",   // done
@@ -1384,6 +1399,11 @@ impl QLambda {
             data: &mut HashMap<String, QEnvEntry>
         ) -> QResult<()>
         {
+            if lhs.len() != rhs.len() {
+                return Err(qerr!(
+                    "fn eval: could not match values to arg pattern"
+                ));
+            }
             for (lk, rk) in lhs.iter().zip(rhs) {
                 match (lk, rk) {
                     (qsymbol!(s), q) => {
@@ -1408,7 +1428,8 @@ impl QLambda {
         return Ok(QEnv {
             data,
             outer: Some(outer_env),
-            dir: outer_env.dir.clone()
+            dir: outer_env.dir.clone(),
+            outfile: None,
         });
     }
 
@@ -2901,11 +2922,25 @@ pub fn parse_atom(token: &str) -> QResult<QExp> {
     };
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct QEnv<'a> {
     data: HashMap<String, QEnvEntry<'a>>,
     outer: Option<&'a QEnv<'a>>,
     pub dir: PathBuf,
+    outfile: Option<File>,
+}
+
+/// All fields are cloned except for `outfile`, which is `None` in the new
+/// object.
+impl<'a> Clone for QEnv<'a> {
+    fn clone(&self) -> Self {
+        return QEnv {
+            data: self.data.clone(),
+            outer: self.outer.clone(),
+            dir: self.dir.clone(),
+            outfile: None,
+        };
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -2922,6 +2957,7 @@ macro_rules! add_mod(
                 data: $mod,
                 outer: None,
                 dir: PathBuf::from("."),
+                outfile: None,
             })
         );
     }
@@ -2987,10 +3023,17 @@ impl<'a> Default for QEnv<'a> {
         add_fn!(env, "format",          "$",    fns::fn_format          );
         add_fn!(env, "print",           "$-",   fns::fn_print           );
         add_fn!(env, "println",         "$_",   fns::fn_println         );
+        add_fn!(env, "read",            "$<",   fns::fn_read            );
+        add_fn!(env, "readlines",       "$<:",  fns::fn_readlines       );
+        add_fn!(env, "with-file",       "$|",   fns::fn_with_file       );
+        add_fn!(env, "with-file-add",   "$|+",  fns::fn_with_file_add   );
+        add_fn!(env, "write",           "$>-",  fns::fn_write           );
+        add_fn!(env, "writeln",         "$>_",  fns::fn_writeln         );
+        add_fn!(env, "write-flush",     "$>>-", fns::fn_write_flush     );
+        add_fn!(env, "writeln-flush",   "$>>_", fns::fn_writeln_flush   );
         add_fn!(env, "halt",            "!!",   fns::fn_halt            );
         add_fn!(env, "istype",          "~?",   fns::fn_istype          );
         add_fn!(env, "type",            "?~",   fns::fn_type            );
-        // add_fn!(env, "with-file",       "$|",   fns::fn_with_file       );
         // type-casting
         add_fn!(env, "bool",                    fns::fn_bool            );
         add_fn!(env, "int",                     fns::fn_int             );
@@ -3152,17 +3195,126 @@ impl<'a> Default for QEnv<'a> {
         add_fn!(phys,   "qlower",   fns::phys_qlower);
         add_mod!(env, "phys", phys);
 
-        return QEnv { data: env, outer: None, dir: PathBuf::from(".") };
+        return QEnv {
+            data: env,
+            outer: None,
+            dir: PathBuf::from("."),
+            outfile: None,
+        };
     }
 }
 
 impl<'a> QEnv<'a> {
     pub fn new(outer_env: Option<&'a QEnv<'a>>, dir: PathBuf) -> Self {
-        return QEnv { data: HashMap::new(), outer: outer_env, dir };
+        return QEnv {
+            data: HashMap::new(),
+            outer: outer_env,
+            dir,
+            outfile: None,
+        };
     }
 
     pub fn default_with_dir(dir: PathBuf) -> Self {
         return QEnv { dir, ..Self::default() };
+    }
+
+    pub fn default_with_outfile(outfile: File) -> Self {
+        return QEnv { outfile: Some(outfile), ..Self::default() };
+    }
+
+    /// Use this as a way to evaluate arbitrary expressions without changing the
+    /// local environment or for nested `with-file` evaluations. Mutability
+    /// rules prevent the use of this as a way to cheaply construct modules,
+    /// however.
+    pub fn sub_env<'b>(&'b mut self) -> QEnv<'b>
+    where 'a: 'b
+    {
+        return QEnv {
+            data: HashMap::new(),
+            outer: Some(self),
+            dir: self.dir.clone(),
+            outfile: None,
+        };
+    }
+
+    pub fn has_outfile(&self) -> bool { self.outfile.is_some() }
+
+    pub fn open_outfile<P>(&mut self, path: P, append: bool) -> QResult<()>
+    where P: AsRef<Path>
+    {
+        return if !self.has_outfile() {
+            let file = fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .append(append)
+                .open(path)
+                .map_err(|e| qerr_fmt!("cannot open file: {}", e))?;
+            self.outfile = Some(file);
+            Ok(())
+        } else {
+            Err(qerr!("output file handle already present"))
+        };
+    }
+
+    pub fn close_outfile(&mut self) -> QResult<()> {
+        return match mem::replace(&mut self.outfile, None) {
+            Some(mut f) => {
+                f.flush()
+                    .map_err(|e| qerr_fmt!(
+                        "failed to flush output before closing: {}", e
+                    ))?;
+                Ok(())
+            },
+            None => { Ok(()) },
+        }
+    }
+
+    pub fn with_dir(mut self, dir: PathBuf) -> Self {
+        self.dir = dir;
+        return self;
+    }
+
+    pub fn with_outfile<P>(mut self, path: P, append: bool) -> QResult<Self>
+    where P: AsRef<Path>
+    {
+        self.open_outfile(path, append)?;
+        return Ok(self);
+    }
+
+    pub fn clone_with_outfile<P>(&self, path: P, append: bool) -> QResult<Self>
+    where P: AsRef<Path>
+    {
+        let mut new = self.clone();
+        new.open_outfile(path, append)?;
+        return Ok(new);
+    }
+
+    pub fn get_outfile(&self) -> Option<&File> {
+        return self.outfile.as_ref();
+    }
+
+    pub fn get_outfile_mut(&mut self) -> Option<&mut File> {
+        return self.outfile.as_mut();
+    }
+
+    pub fn write_to_file(&mut self, out: &str) -> QResult<()> {
+        return match self.get_outfile_mut() {
+            Some(f) => {
+                write!(f, "{}", out)
+                    .map_err(|e| qerr_fmt!("cannot write to file: {}", e))
+            },
+            None => Err(qerr!("missing output file handle")),
+        };
+    }
+
+    pub fn writeln_to_file(&mut self, out: &str) -> QResult<()> {
+        return match self.get_outfile_mut() {
+            Some(f) => {
+                writeln!(f, "{}", out)
+                    .map_err(|e| qerr_fmt!("cannot write to file: {}", e))
+            },
+            None => Err(qerr!("missing output file handle")),
+        };
     }
 
     pub fn symbols(&self) -> Vec<String> { self.data.keys().cloned().collect() }
@@ -3322,7 +3474,9 @@ impl<'a> QEnv<'a> {
     }
 
     pub fn insert(&mut self, k: String, val: QEnvEntry<'a>) {
-        self.data.insert(k, val);
+        if k != "_".to_string() {
+            self.data.insert(k, val);
+        }
     }
 
     pub fn remove(&mut self, k: &str) -> QResult<QEnvEntry<'a>> {

@@ -2519,6 +2519,7 @@ impl<'a> ReplEnv for QEnv<'a> {
     const NOPRINT: &'static [&'static str] = &[
         "help",     "?",
         "def",      ":=",
+        "let",      "*:=",
         "defn",     "@:=",
         "print",    "$-",
         "println",  "$_",
@@ -3165,9 +3166,6 @@ impl reed::EditMode for QEditMode {
                 (KeyCode::Down, KeyMod::NONE) => {
                     RLEvent::Down
                 },
-                (KeyCode::Enter, KeyMod::NONE) => {
-                    RLEvent::Enter
-                },
                 (KeyCode::Enter, KeyMod::SHIFT) => {
                     RLEvent::Edit(vec![
                         reed::EditCommand::InsertChar('\n')
@@ -3176,24 +3174,27 @@ impl reed::EditMode for QEditMode {
                 (KeyCode::Enter, KeyMod::CONTROL) => {
                     RLEvent::Submit
                 },
-                (KeyCode::Backspace, KeyMod::NONE) => {
-                    RLEvent::Edit(vec![
-                        reed::EditCommand::Backspace
-                    ])
+                (KeyCode::Enter, KeyMod::NONE) => {
+                    RLEvent::Enter
                 },
                 (KeyCode::Backspace, KeyMod::CONTROL) => {
                     RLEvent::Edit(vec![
                         reed::EditCommand::BackspaceWord
                     ])
                 },
-                (KeyCode::Delete, KeyMod::NONE) => {
+                (KeyCode::Backspace, KeyMod::NONE) => {
                     RLEvent::Edit(vec![
-                        reed::EditCommand::Delete
+                        reed::EditCommand::Backspace
                     ])
                 },
                 (KeyCode::Delete, KeyMod::CONTROL) => {
                     RLEvent::Edit(vec![
                         reed::EditCommand::DeleteWord
+                    ])
+                },
+                (KeyCode::Delete, KeyMod::NONE) => {
+                    RLEvent::Edit(vec![
+                        reed::EditCommand::Delete
                     ])
                 },
                 (KeyCode::Home, KeyMod::NONE) => {

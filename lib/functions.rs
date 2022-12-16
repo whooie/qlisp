@@ -1,6 +1,9 @@
 use std::{
     cmp,
-    fs::File,
+    fs::{
+        self,
+        File,
+    },
     io::Read,
     mem,
     path::PathBuf,
@@ -487,6 +490,243 @@ pub fn fn_println(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("println"))?;
     println!("{}", formatted);
     std::io::Write::flush(&mut std::io::stdout()).unwrap();
+    return if vals.len() == 1 {
+        Ok(vals.into_iter().next().unwrap())
+    } else {
+        Ok(qlist!(vals))
+    };
+}
+
+pub fn fn_read(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    fn do_read(args: &[QExp]) -> QResult<QExp> {
+        if args.len() == 1 {
+            if let Some(qlist!(l)) = args.first() {
+                return do_read(l);
+            }
+        }
+        let filepaths: Vec<&String>
+            = args.iter()
+            .map(|q| match q {
+                qstr!(s) => Ok(s),
+                _ => Err(qerr!("read: file paths must be strings")),
+            })
+            .collect::<QResult<Vec<&String>>>()?;
+        let mut bufs: Vec<String>
+            = (0..filepaths.len()).map(|_| String::new()).collect();
+        for (buf, path) in bufs.iter_mut().zip(filepaths.iter()) {
+            fs::OpenOptions::new()
+                .read(true)
+                .open(path)
+                .map_err(|e| qerr_fmt!(
+                    "read: cannot open file {}: {}", path, e
+                ))?
+                .read_to_string(buf)
+                .map_err(|e| qerr_fmt!(
+                    "read: cannot read file {}: {}", path, e
+                ))?;
+        }
+        return if bufs.len() == 1 {
+            Ok(qstr!(bufs.into_iter().next().unwrap()))
+        } else {
+            Ok(qlist!(bufs.into_iter().map(|s| qstr!(s)).collect()))
+        };
+    }
+    if args.is_empty() {
+        return Err(qerr!("read: missing file paths"));
+    }
+    return do_read(&env.eval_multi(args)?);
+}
+
+pub fn fn_readlines(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    fn do_readlines(args: &[QExp]) -> QResult<QExp> {
+        if args.len() == 1 {
+            if let Some(qlist!(l)) = args.first() {
+                return do_readlines(l);
+            }
+        }
+        let filepaths: Vec<&String>
+            = args.iter()
+            .map(|q| match q {
+                qstr!(s) => Ok(s),
+                _ => Err(qerr!("readlines: file paths must be strings")),
+            })
+            .collect::<QResult<Vec<&String>>>()?;
+        let mut bufs: Vec<String>
+            = (0..filepaths.len()).map(|_| String::new()).collect();
+        for (buf, path) in bufs.iter_mut().zip(filepaths.iter()) {
+            fs::OpenOptions::new()
+                .read(true)
+                .open(path)
+                .map_err(|e| qerr_fmt!(
+                    "readlines: cannot open file {}: {}", path, e
+                ))?
+                .read_to_string(buf)
+                .map_err(|e| qerr_fmt!(
+                    "readlines: cannot open file {}: {}", path, e
+                ))?;
+        }
+        return if bufs.len() == 1 {
+            Ok(qlist!(
+                bufs.into_iter().next().unwrap()
+                .split('\n')
+                .map(|line| qstr!(line.to_string()))
+                .collect()
+            ))
+        } else {
+            Ok(qlist!(
+                bufs.into_iter()
+                .map(|s| {
+                    qlist!(
+                        s.split('\n')
+                        .map(|line| qstr!(line.to_string()))
+                        .collect()
+                    )
+                })
+                .collect()
+            ))
+        };
+    }
+    if args.is_empty() {
+        return Err(qerr!("readlines: missing file paths"));
+    }
+    return do_readlines(&env.eval_multi(args)?);
+}
+
+pub fn fn_with_file(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    if args.len() != 2 {
+        return Err(qerr_fmt!(
+            "with-file: expected 2 args but got {}", args.len()));
+    }
+    let filepath: String = match env.eval(args.get(0).unwrap())? {
+        qstr!(s) => Ok(s),
+        _ => Err(qerr!("with-file: file paths must be strings")),
+    }?;
+    let res: Vec<QExp> = match args.get(1).unwrap() {
+        qlist!(l) => {
+            let mut writer: QEnv
+                = env.sub_env()
+                .with_outfile(&filepath, false)
+                .map_err(|e| e.prepend_source("with-file-add"))?;
+            let res: Vec<QExp> = writer.eval_multi(l)?;
+            env.close_outfile()
+                .map_err(|e| e.prepend_source("with-file-add"))?;
+            Ok(res)
+        },
+        _ => Err(qerr!(
+            "with-file: second arg must be a list of expressions"
+        )),
+    }?;
+    return Ok(qlist!(res));
+}
+
+pub fn fn_with_file_add(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    if args.len() != 2 {
+        return Err(qerr_fmt!(
+            "with-file-add: expected 2 args but got {}", args.len()));
+    }
+    let filepath: String = match env.eval(args.get(0).unwrap())? {
+        qstr!(s) => Ok(s),
+        _ => Err(qerr!("with-file-add: file paths must be strings")),
+    }?;
+    let res: Vec<QExp> = match args.get(1).unwrap() {
+        qlist!(l) => {
+            let mut writer: QEnv
+                = env.sub_env()
+                .with_outfile(&filepath, true)
+                .map_err(|e| e.prepend_source("with-file-add"))?;
+            let res: Vec<QExp> = writer.eval_multi(l)?;
+            env.close_outfile()
+                .map_err(|e| e.prepend_source("with-file-add"))?;
+            Ok(res)
+        },
+        _ => Err(qerr!(
+            "with-file-add: second arg must be a list of expressions"
+        )),
+    }?;
+    return Ok(qlist!(res));
+}
+
+pub fn fn_write(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    if args.is_empty() {
+        return Err(qerr!("write: missing format string"));
+    }
+    let fmtstr: String = match env.eval(args.get(0).unwrap())? {
+        qstr!(s) => Ok(s),
+        _ => Err(qerr!("write: first arg must be a format string")),
+    }?;
+    let vals: Vec<QExp> = env.eval_multi(&args[1..])?;
+    let formatted: String
+        = fmtstr.format(&vals)
+        .map_err(|e| e.prepend_source("write"))?;
+    env.write_to_file(&formatted)
+        .map_err(|e| e.prepend_source("write"))?;
+    return if vals.len() == 1 {
+        Ok(vals.into_iter().next().unwrap())
+    } else {
+        Ok(qlist!(vals))
+    };
+}
+
+pub fn fn_writeln(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    if args.is_empty() {
+        return Err(qerr!("writeln: missing format string"));
+    }
+    let fmtstr: String = match env.eval(args.get(0).unwrap())? {
+        qstr!(s) => Ok(s),
+        _ => Err(qerr!("writeln: first arg must be a format string")),
+    }?;
+    let vals: Vec<QExp> = env.eval_multi(&args[1..])?;
+    let formatted: String
+        = fmtstr.format(&vals)
+        .map_err(|e| e.prepend_source("writeln"))?;
+    env.writeln_to_file(&formatted)
+        .map_err(|e| e.prepend_source("writeln"))?;
+    return if vals.len() == 1 {
+        Ok(vals.into_iter().next().unwrap())
+    } else {
+        Ok(qlist!(vals))
+    };
+}
+
+pub fn fn_write_flush(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    if args.is_empty() {
+        return Err(qerr!("write: missing format string"));
+    }
+    let fmtstr: String = match env.eval(args.get(0).unwrap())? {
+        qstr!(s) => Ok(s),
+        _ => Err(qerr!("write: first arg must be a format string")),
+    }?;
+    let vals: Vec<QExp> = env.eval_multi(&args[1..])?;
+    let formatted: String
+        = fmtstr.format(&vals)
+        .map_err(|e| e.prepend_source("write"))?;
+    env.write_to_file(&formatted)
+        .map_err(|e| e.prepend_source("write"))?;
+    std::io::Write::flush(env.get_outfile_mut().unwrap())
+        .map_err(|e| qerr_fmt!("write-flush: cannot flush output {}", e))?;
+    return if vals.len() == 1 {
+        Ok(vals.into_iter().next().unwrap())
+    } else {
+        Ok(qlist!(vals))
+    };
+}
+
+pub fn fn_writeln_flush(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    if args.is_empty() {
+        return Err(qerr!("writeln: missing format string"));
+    }
+    let fmtstr: String = match env.eval(args.get(0).unwrap())? {
+        qstr!(s) => Ok(s),
+        _ => Err(qerr!("writeln: first arg must be a format string")),
+    }?;
+    let vals: Vec<QExp> = env.eval_multi(&args[1..])?;
+    let formatted: String
+        = fmtstr.format(&vals)
+        .map_err(|e| e.prepend_source("writeln"))?;
+    env.writeln_to_file(&formatted)
+        .map_err(|e| e.prepend_source("writeln"))?;
+    std::io::Write::flush(env.get_outfile_mut().unwrap())
+        .map_err(|e| qerr_fmt!("writeln-flush: cannot flush output: {}", e))?;
     return if vals.len() == 1 {
         Ok(vals.into_iter().next().unwrap())
     } else {
@@ -2067,6 +2307,7 @@ macro_rules! elementwise_fn(
                     }
                     return args.get(0).unwrap().$method();
                 } else {
+                    println!("{:?}", args);
                     let new: Vec<QExp>
                         = args.iter()
                         .map(|x| x.$method())
