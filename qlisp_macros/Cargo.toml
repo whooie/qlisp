@@ -1,0 +1,21 @@
+[package]
+name = "qlisp_macros"
+version = "0.1.0"
+authors = [ "whooie <wcwhuie@gmail.com>",]
+edition = "2021"
+
+[dependencies]
+syn = { version = "1.0.107", features = [ "full", "extra-traits", ] }
+quote = "1.0.23"
+litrs = "0.3.0"
+convert_case = "0.6.0"
+thiserror = "1.0.38"
+
+[lib]
+proc-macro = true
+path = "lib/lib.rs"
+name = "qlisp_macros"
+
+[profile.release]
+lto = true
+panic = "abort"

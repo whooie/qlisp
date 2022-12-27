@@ -4,12 +4,19 @@ use std::{
         self,
         File,
     },
-    io::Read,
+    io::{
+        Read,
+        BufRead,
+        BufReader,
+    },
     mem,
     path::PathBuf,
     rc::Rc,
 };
 use itertools::Itertools;
+use qlisp_macros::{
+    builtin,
+};
 use crate::{
     qerr,
     qerr_fmt,
@@ -30,6 +37,7 @@ use crate::{
         QResult,
         QExp,
         QExpType,
+        QBuiltin,
         QLambda,
         QEnv,
         QEnvEntry,
@@ -47,6 +55,20 @@ use crate::{
  * special
  */
 
+/// Assign a value to a symbol and store it in the local environment.
+/// Alias: `:=`
+///
+/// Expected form:
+/// `(def <symbol> <value expression>)`
+///
+/// Example:
+/// ```text
+/// q>> (def a (+ 1 2 3)) ; assign `6` to `a`
+/// q>> a ; evaluates to 6
+/// q>> (+ 5 (def b (* 10 11))) ; evaluates to 115
+/// q>> b ; evaluates to 110
+/// ```
+#[builtin(name = "def", alias = ":=")]
 pub fn fn_def(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -71,6 +93,22 @@ pub fn fn_def(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return Ok(val);
 }
 
+/// Assign multiple values to multiple symbols, recursively unpacking lists if
+/// necessary. The top-level value expression must be a list.
+/// Alias: `*:=`
+///
+/// Expected form:
+/// `(let (<symbols>...) (<values>...))`
+///
+/// Example:
+/// ```text
+/// q>> (let (a b (c d)) (0 1 (2 (range 3 6))))
+/// q>> a ; evaluates to 0
+/// q>> b ; evaluates to 1
+/// q>> c ; evaluates to 2
+/// q>> d ; evaluates to (3 4 5)
+/// ```
+#[builtin(name = "let", alias = "*:=")]
 pub fn fn_let(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn get_assignments(lhs: &QExp, rhs: &QExp)
         -> QResult<Vec<(QExp, QExp)>>
@@ -152,6 +190,18 @@ pub fn fn_let(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return Ok(qlist!(values));
 }
 
+/// Construct an anonymous (lambda) function.
+/// Alias: `@:`
+///
+/// Expected form:
+/// `(fn (<args>...) <body expression>)`
+///
+/// Example:
+/// ```text
+/// q>> ; define a function 5 * b + a and immediately call it
+/// q>> ((fn (a b) (+ a (* 5 b))) 8 2) ; evaluates to 18
+/// ```
+#[builtin(name = "fn", alias = "@:")]
 pub fn fn_fn(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn subs_from_env(env: &mut QEnv, protected: &[String], body_exp: &QExp)
         -> QExp
@@ -226,6 +276,20 @@ pub fn fn_fn(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     );
 }
 
+/// Portmanteau of 'def' and 'fn': Construct a function and assign it to a
+/// symbol in the local environment.
+/// Alias: `@:=`
+///
+/// Expected form:
+/// `(defn <symbol> (<args>...) <body expression>)`
+///
+/// Example:
+/// ```text
+/// q>> ; recursive definition of the factorial operation
+/// q>> (defn factorial (n) (if (<= n 1) 1 (* (factorial (- n 1)) n)))
+/// q>> (factorial 5) ; evaluates to 120
+/// ```
+#[builtin(name = "defn", alias = "@:=")]
 pub fn fn_defn(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 3 {
         return Err(qerr_fmt!(
@@ -250,6 +314,20 @@ pub fn fn_defn(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return Ok(lambda)
 }
 
+/// Conditional expression: Evaluates one of two expressions based on the
+/// true/false value of a test expression.
+///
+/// Expected form:
+/// `(if <test expression> <true expression> <false expression>)`
+///
+/// Example:
+/// ```text
+/// q>> (def a true)
+/// q>> (if a 1 0) ; evaluates to 1
+/// q>> (def b false)
+/// q>> (if b 1 0) ; evaluates to 0
+/// ```
+#[builtin(name = "if")]
 pub fn fn_if(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 3 {
         return Err(qerr_fmt!(
@@ -265,6 +343,24 @@ pub fn fn_if(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     };
 }
 
+/// Construct a module and assign it to a symbol in the local environment.
+/// Evaluated data is returned as a list ordered by evaluation.
+///
+/// Expected form:
+/// `(module <symbol> (<expressions...>))`
+///
+/// Example:
+/// ```text
+/// q>> ; use a namespace (module) to hold a set of constants and functions
+/// q>> ; elements of a module cannot be changed from the outside
+/// q>> (module my-module ((def a 10) (defn add-to-a (b) (+ a b))))
+/// q>> my-module::a ; evaluates to 10
+/// q>> ; functions inside a module are unaffected by outer environments
+/// q>> (my-module::add-to-a 10) ; evaluates to 20
+/// q>> (def a 15)
+/// q>> (my-module::add-to-a 10) ; evaluates to 20
+/// ```
+#[builtin(name = "module")]
 pub fn fn_module(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -293,6 +389,28 @@ pub fn fn_module(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return Ok(qlist!(mod_values));
 }
 
+/// Load an external file as a module and assign it to a symbol in the local
+/// environment. External files are specified as a symbolic path, where each
+/// element in the path should correspond to a directory except for the final
+/// element, which should correspond to a file name. The final element should
+/// not have a file extension; instead the directory corresponding to the final
+/// parent in the path will be searched for files with stems equal to the final
+/// element and ending with '.qlisp', or '.qlsp' (searched in that order). All
+/// paths are treated as relative to the file being executed or the current
+/// working directory if the REPL is being used. Use 'super' in a path to
+/// specify a parent directory (equivalent to '..'). A symbol may be also be
+/// specified to store the module under; the default symbol is the final path
+/// element.
+///
+/// Expected form:
+/// `(use <path> [symbol])`
+///
+/// Example:
+/// ```text
+/// q>> ; load ../mod1/mod2/child.qlisp and store it as child-mod
+/// q>> (use super::mod1::mod2::child child-mod)
+/// ```
+#[builtin(name = "use")]
 pub fn fn_use(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if !(1..=2).contains(&args.len()) {
         return Err(qerr_fmt!(
@@ -351,6 +469,29 @@ pub fn fn_use(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return Err(qerr_fmt!("use: cannot not load module {}", path));
 }
 
+/// Load the contents of an external file as a module and bring all of its
+/// contents into the local environment.External files are specified as a
+/// symbolic path, where each element in the path should correspond to a
+/// directory except for the final element, which should correspond to a file
+/// name. The final element should not have a file extension; instead the
+/// directory corresponding to the final parent in the path will be searched for
+/// files with stems equal to the final element and ending with '.qlisp', or
+/// '.qlsp' (searched in that order). All paths are treated as relative to the
+/// file being executed or the current working directory if the REPL is being
+/// used. Use 'super' in a path to specify a parent directory (equivalent to
+/// '..'). A symbol may be also be specified to store the module under; the
+/// default symbol is the final path element.
+/// Alias: `use*`
+///
+/// Expected form:
+/// `(use-all <path>)`
+///
+/// Example:
+/// ```text
+/// q>> ; load the contents of ../mod1/mod2/child.qlisp into the local environment
+/// q>> (use-all super::mod1::mod2::child)
+/// ```
+#[builtin(name = "use-all", alias = "use*")]
 pub fn fn_use_all(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 1 {
         return Err(qerr_fmt!(
@@ -388,11 +529,44 @@ pub fn fn_use_all(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return Err(qerr_fmt!("use-all: cannot not load module {}", path));
 }
 
+/// Immedately pause execution of a program and launch the REPL. Execution will
+/// continue when the REPL is exited.
+///
+/// Expected form:
+/// `(interact)`
+///
+/// Example:
+/// ```text
+/// q>> ; suppose this is in the middle of a file being executed
+/// q>> (def a 10)
+/// q>> (defn foo (b) (+ a b))
+/// q>> ; launch the REPL here
+/// q>> ; the environment will hold whatever definitions have been made up to this
+/// q>> ; point in the program
+/// q>> (interact)
+/// q>> ; continue doing other things after the REPL exits.
+/// ```
+#[builtin(name = "interact")]
 pub fn fn_interact(env: &mut QEnv, _args: &[QExp]) -> QResult<QExp> {
     run_repl(env);
     return Ok(qint!(0));
 }
 
+/// Check whether a set of definitions is present. Returns `true` if all symbols
+/// passed as arguments exist with a value, `false` otherwise.
+/// Alias: `?:=`
+///
+/// Expected form:
+/// `(isdef <symbols>...)`
+///
+/// Example:
+/// ```text
+/// q>> (def a 10)
+/// q>> (def foo (b) (+ a b))
+/// q>> (module my-module ((def c 15)))
+/// q>> (isdef a foo my-module::c) ; evaluates to true
+/// ```
+#[builtin(name = "isdef", alias = "?:=")]
 pub fn fn_isdef(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     let isdef: bool
         = args.iter()
@@ -406,6 +580,21 @@ pub fn fn_isdef(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return Ok(qbool!(isdef));
 }
 
+/// Remove a definition from the local environment. Any value including modules
+/// may be removed, but only values will be returned.
+/// Alias: `!-`
+///
+/// Expected form:
+/// `(del <symbols>...)`
+///
+/// Example:
+/// ```text
+/// q>> (def a 10)
+/// q>> a ; evaluates to 10
+/// q>> (del a) ; evaluates to 10
+/// q>> a ; causes an error
+/// ```
+#[builtin(name = "def", alias = "!-")]
 pub fn fn_del(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     let vals: Vec<QExp>
         = args.iter()
@@ -440,6 +629,18 @@ pub fn fn_del(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
  * systems
  */
 
+/// Substitute values for patterns in a format string.
+/// Alias: `$`
+///
+/// Expected form:
+/// `(format <format string> <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (format \"hello, {}!\" \"John\") ; evaluates to \"hello, John!\"
+/// q>> (format \"{:.5}\" 3.141592653589793238) ; evaluates to \"3.14159\"
+/// ```
+#[builtin(name = "format", alias = "$")]
 pub fn fn_format(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.is_empty() {
         return Err(qerr!("format: missing format string"));
@@ -455,7 +656,95 @@ pub fn fn_format(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return Ok(qstr!(formatted));
 }
 
+/// Substitute values for patterns in a format string and print to STDOUT. If a
+/// single value is passed, the value is returned; if multiple values are
+/// passed, they are all returned in a list.
+/// Alias: `$-`
+///
+/// Expected form:
+/// `(print <format string> <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (print "hello {}" "John") ; prints `hello John`; evaluates to "John"
+/// q>> ; passed values are returned, so `print` can be inserted in the middle
+/// q>> ; of other expressions
+/// q>> (+ (print "{}" (* 2 3)) 5) ; prints `6` and evaluates to 11
+/// ```
+#[builtin(name = "print", alias = "$-")]
 pub fn fn_print(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    if args.is_empty() {
+        return Err(qerr!("print: missing format string"));
+    }
+    let fmtstr: String = match env.eval(args.get(0).unwrap())? {
+        qstr!(s) => Ok(s),
+        _ => Err(qerr!("print: first arg must be a format string")),
+    }?;
+    let vals: Vec<QExp> = env.eval_multi(&args[1..])?;
+    let formatted: String
+        = fmtstr.format(&vals)
+        .map_err(|e| e.prepend_source("print"))?;
+    print!("{}", formatted);
+    return if vals.len() == 1 {
+        Ok(vals.into_iter().next().unwrap())
+    } else {
+        Ok(qlist!(vals))
+    };
+}
+
+/// Substitute values for patterns in a format string and print to STDOUT with
+/// newline appended. If a single value is passed, the value is returned; if
+/// multiple values are passed, they are all returned in a list.
+/// Alias: `$_`
+///
+/// Expected form:
+/// `(println <format string> <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (println "hello {}" "John") ; prints `hello John\n`; evaluates to "John"
+/// q>> ; passed values are returned, so `println` can be inserted in the middle
+/// q>> ; of other expressions
+/// q>> (+ (println "{}" (* 2 3)) 5) ; prints `6\n` and evaluates to 11
+/// ```
+#[builtin(name = "println", alias = "$_")]
+pub fn fn_println(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    if args.is_empty() {
+        return Err(qerr!("println: missing format string"));
+    }
+    let fmtstr: String = match env.eval(args.get(0).unwrap())? {
+        qstr!(s) => Ok(s),
+        _ => Err(qerr!("println: first arg must be a format string")),
+    }?;
+    let vals: Vec<QExp> = env.eval_multi(&args[1..])?;
+    let formatted: String
+        = fmtstr.format(&vals)
+        .map_err(|e| e.prepend_source("println"))?;
+    println!("{}", formatted);
+    return if vals.len() == 1 {
+        Ok(vals.into_iter().next().unwrap())
+    } else {
+        Ok(qlist!(vals))
+    };
+}
+
+/// Substitute values for patterns in a format string and print to STDOUT,
+/// immediately flushing output after. If a single value is passed, the value is
+/// returned; if multiple values are passed, they are all returned in a list.
+/// Alias: `$$-`
+///
+/// Expected form:
+/// `(print <format string> <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (print "hello {}" "John") ; prints `hello John`; evaluates to "John"
+/// q>> ; passed values are returned, so `print` can be inserted in the middle
+/// q>> ; of other expressions
+/// q>> (+ (print "{}" (* 2 3)) 5) ; prints `6` and evaluates to 11
+/// ```
+#[builtin(name = "print-flush", alias = "$$-")]
+pub fn fn_print_flush(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.is_empty() {
         return Err(qerr!("print: missing format string"));
     }
@@ -476,7 +765,24 @@ pub fn fn_print(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     };
 }
 
-pub fn fn_println(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+/// Substitute values for patterns in a format string and print to STDOUT with
+/// newline appended, immediately flushing output after. If a single value is
+/// passed, the value is returned; if multiple values are passed, they are all
+/// returned in a list.
+/// Alias: `$$_`
+///
+/// Expected form:
+/// `(println <format string> <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (println "hello {}" "John") ; prints `hello John\n`; evaluates to "John"
+/// q>> ; passed values are returned, so `println` can be inserted in the middle
+/// q>> ; of other expressions
+/// q>> (+ (println "{}" (* 2 3)) 5) ; prints `6\n` and evaluates to 11
+/// ```
+#[builtin(name = "println-flush", alias = "$$_")]
+pub fn fn_println_flush(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.is_empty() {
         return Err(qerr!("println: missing format string"));
     }
@@ -497,6 +803,29 @@ pub fn fn_println(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     };
 }
 
+/// Read the contents of one or more files into strs. File paths should be
+/// passed as strs in a list or a single str.
+/// Alias: `$<`
+///
+/// Expected form:
+/// `(read <file paths>...)`
+///
+/// Example:
+/// ```text
+/// q>> ; suppose there are two files:
+/// q>> ; /path/to/file1.txt
+/// q>> ; ---
+/// q>> ; some data here...
+/// q>> ;
+/// q>> ; /path/to/file2.txt
+/// q>> ; ---
+/// q>> ; some other data
+/// q>> ; here...
+/// q>> (read "/path/to/file1.txt") ; evaluates to "some data here...\n"
+/// q>> (read ("/path/to/file1.txt" "/path/to/file2.txt"))
+/// q>> ; evaluates to ("some data here...\n" "some other data\nhere...\n")
+/// ```
+#[builtin(name = "read", alias = "$<")]
 pub fn fn_read(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn do_read(args: &[QExp]) -> QResult<QExp> {
         if args.len() == 1 {
@@ -537,6 +866,30 @@ pub fn fn_read(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return do_read(&env.eval_multi(args)?);
 }
 
+/// Read the contents of one or more files into a list or lists of lines with
+/// newline characters stripped. File paths should be passed as strs in a list
+/// or a single str.
+/// Alias: `$<:`
+///
+/// Expected form:
+/// `(readlines <file paths>...)`
+///
+/// Example:
+/// ```text
+/// q>> ; suppose there are two files:
+/// q>> ; /path/to/file1.txt
+/// q>> ; ---
+/// q>> ; some data here...
+/// q>> ;
+/// q>> ; /path/to/file2.txt
+/// q>> ; ---
+/// q>> ; some other data
+/// q>> ; here...
+/// q>> (readlines "/path/to/file1.txt") ; evaluates to ("some data here...")
+/// q>> (readlines ("/path/to/file1.txt" "/path/to/file2.txt"))
+/// q>> ; evaluates to (("some data here...") ("some other data") ("here..."))
+/// ```
+#[builtin(name = "readlines", alias = "$<:")]
 pub fn fn_readlines(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn do_readlines(args: &[QExp]) -> QResult<QExp> {
         if args.len() == 1 {
@@ -551,37 +904,40 @@ pub fn fn_readlines(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
                 _ => Err(qerr!("readlines: file paths must be strings")),
             })
             .collect::<QResult<Vec<&String>>>()?;
-        let mut bufs: Vec<String>
-            = (0..filepaths.len()).map(|_| String::new()).collect();
-        for (buf, path) in bufs.iter_mut().zip(filepaths.iter()) {
-            fs::OpenOptions::new()
+        let mut file_lines: Vec<Vec<String>> = Vec::new();
+        let mut file: File;
+        let mut bufreader: BufReader<File>;
+        for path in filepaths.iter() {
+            file = fs::OpenOptions::new()
                 .read(true)
                 .open(path)
                 .map_err(|e| qerr_fmt!(
                     "readlines: cannot open file {}: {}", path, e
-                ))?
-                .read_to_string(buf)
-                .map_err(|e| qerr_fmt!(
-                    "readlines: cannot open file {}: {}", path, e
                 ))?;
+            bufreader = BufReader::new(file);
+            file_lines.push(
+                bufreader.lines()
+                    .collect::<std::io::Result<Vec<String>>>()
+                    .map_err(|e| qerr_fmt!(
+                        "readlines: cannot read file: {}", e
+                    ))?
+            );
         }
-        return if bufs.len() == 1 {
+        return if file_lines.len() == 1 {
             Ok(qlist!(
-                bufs.into_iter().next().unwrap()
-                .split('\n')
-                .map(|line| qstr!(line.to_string()))
+                file_lines.into_iter().next().unwrap()
+                .into_iter()
+                .map(|line| qstr!(line))
                 .collect()
             ))
         } else {
             Ok(qlist!(
-                bufs.into_iter()
-                .map(|s| {
-                    qlist!(
-                        s.split('\n')
-                        .map(|line| qstr!(line.to_string()))
-                        .collect()
-                    )
-                })
+                file_lines.into_iter()
+                .map(|lines| qlist!(
+                    lines.into_iter()
+                    .map(|line| qstr!(line))
+                    .collect()
+                ))
                 .collect()
             ))
         };
@@ -592,6 +948,27 @@ pub fn fn_readlines(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return do_readlines(&env.eval_multi(args)?);
 }
 
+/// Open a temporary environment holding a file for writing, erasing its
+/// contents if it already exists. File paths are taken to be relative to the
+/// current directory if not absolute.
+/// Alias: `$|`
+///
+/// Expected form:
+/// `(with-file <file path> (<expressions...>))`
+///
+/// Example:
+/// ```test
+/// q>> (def outer 10) ; define a variable in the outer environment
+/// q>> ; write to file "path/to/file.txt"
+/// q>> (with-file "path/to/file.txt" (
+/// ...     (writeln "outer = {}" outer)
+/// ...     (def inner 11) ; any expression is legal here
+/// ...     (writeln "inner = {}" inner)
+/// ... ))
+/// q>> ; variables defined in the inner environment do not persist
+/// q>> inner ; error!
+/// ```
+#[builtin(name = "with-file", alias = "$|")]
 pub fn fn_with_file(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -619,6 +996,27 @@ pub fn fn_with_file(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return Ok(qlist!(res));
 }
 
+/// Open a temporary environment holding a file for writing, appending to its
+/// contents if it already exists. File paths are taken to be relative to the
+/// current directory if not absolute.
+/// Alias: `$|+`
+///
+/// Expected form:
+/// `(with-file <file path> (<expressions...>))`
+///
+/// Example:
+/// ```text
+/// q>> (def outer 10) ; define a variable in the outer environment
+/// q>> ; write to file "path/to/file.txt"
+/// q>> (with-file-add "path/to/file.txt" (
+/// ...     (writeln "outer = {}" outer)
+/// ...     (def inner 11) ; any expression is legal here
+/// ...     (writeln "inner = {}" inner)
+/// ... ))
+/// q>> ; variables defined in the inner environment do not persist
+/// q>> inner ; error!
+/// ```
+#[builtin(name = "with-file-add", alias = "$|+")]
 pub fn fn_with_file_add(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -646,6 +1044,26 @@ pub fn fn_with_file_add(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return Ok(qlist!(res));
 }
 
+/// Write a formatted string to the current output file held by the environment.
+/// Only valid within a `with-file` or `with-file-add` environment.
+/// Alias: `$>-`
+///
+/// Expected form:
+/// `(write <format string> <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (def outer 10) ; define a variable in the outer environment
+/// q>> ; write to file "path/to/file.txt"
+/// q>> (with-file "path/to/file.txt" (
+/// ...     (write "outer = {}" outer)
+/// ...     (def inner 11) ; any expression is legal here
+/// ...     (write "inner = {}" inner)
+/// ... ))
+/// q>> ; variables defined in the inner environment do not persist
+/// q>> inner ; error!
+/// ```
+#[builtin(name = "write", alias = "$>-")]
 pub fn fn_write(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.is_empty() {
         return Err(qerr!("write: missing format string"));
@@ -667,6 +1085,27 @@ pub fn fn_write(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     };
 }
 
+/// Write a formatted string with newline appended to the current output file
+/// held by the environment. Only valid within a `with-file` or `with-file-add`
+/// environment.
+/// Alias: `$>_`
+///
+/// Expected form:
+/// `(writeln <format string> <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (def outer 10) ; define a variable in the outer environment
+/// q>> ; write to file "path/to/file.txt"
+/// q>> (with-file "path/to/file.txt" (
+/// ...     (writeln "outer = {}" outer)
+/// ...     (def inner 11) ; any expression is legal here
+/// ...     (writeln "inner = {}" inner)
+/// ... ))
+/// q>> ; variables defined in the inner environment do not persist
+/// q>> inner ; error!
+/// ```
+#[builtin(name = "writeln", alias = "$>_")]
 pub fn fn_writeln(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.is_empty() {
         return Err(qerr!("writeln: missing format string"));
@@ -688,6 +1127,27 @@ pub fn fn_writeln(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     };
 }
 
+/// Write a formatted string to the current output file held by the environment
+/// and immediately flush output. Only valid within a `with-file` or
+/// `with-file-add` environment.
+/// Alias: `$$>-`
+///
+/// Expected form:
+/// `(write-flush <format string> <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (def outer 10) ; define a variable in the outer environment
+/// q>> ; write to file "path/to/file.txt"
+/// q>> (with-file "path/to/file.txt" (
+/// ...     (write-flush "outer = {}" outer)
+/// ...     (def inner 11) ; any expression is legal here
+/// ...     (write-flush "inner = {}" inner)
+/// ... ))
+/// q>> ; variables defined in the inner environment do not persist
+/// q>> inner ; error!
+/// ```
+#[builtin(name = "write-flush", alias = "$$>-")]
 pub fn fn_write_flush(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.is_empty() {
         return Err(qerr!("write: missing format string"));
@@ -711,6 +1171,27 @@ pub fn fn_write_flush(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     };
 }
 
+/// Write a formatted string with newline appended to the current output file
+/// held by the environment and immediately flush output. Only valid within a
+/// `with-file` or `with-file-add` environment.
+/// Alias: `$$>_`
+///
+/// Expected form:
+/// `(writeln-flush <format string> <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (def outer 10) ; define a variable in the outer environment
+/// q>> ; write to file "path/to/file.txt"
+/// q>> (with-file "path/to/file.txt" (
+/// ...     (writeln-flush "outer = {}" outer)
+/// ...     (def inner 11) ; any expression is legal here
+/// ...     (writeln-flush "inner = {}" inner)
+/// ... ))
+/// q>> ; variables defined in the inner environment do not persist
+/// q>> inner ; error!
+/// ```
+#[builtin(name = "writeln-flush", alias = "$$>_")]
 pub fn fn_writeln_flush(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.is_empty() {
         return Err(qerr!("writeln: missing format string"));
@@ -734,6 +1215,19 @@ pub fn fn_writeln_flush(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     };
 }
 
+/// Substitute values for patterns in a format string and return the result as
+/// an error.
+/// Alias: `!!`
+///
+/// Expected form:
+/// `(halt <format string> <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (defn a -1)
+/// q>> (if (> a 0) (* a 2) (halt "expected a positive value, but got {}" a))
+/// ```
+#[builtin(name = "defn", alias = "!!")]
 pub fn fn_halt(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.is_empty() {
         return Err(qerr!("halt"));
@@ -749,6 +1243,23 @@ pub fn fn_halt(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return Err(qerr_fmt!("halt: {}", formatted));
 }
 
+/// Returns `true` if a value is of a given type or list of types, `false`
+/// otherwise. Types must be specified as strs. Available type names are:
+/// `"bool"`, `"int"`, `"float"`, `"complex"`, `"list"`, `"str"`, `"function"`,
+/// `"any"`.
+/// Alias: `~?`
+///
+/// Expected form:
+/// `(istype <type or list of types> <value>)`
+///
+/// Example:
+/// ```text
+/// q>> (def z 5i)
+/// q>> (istype "complex" z) ; evaluates to true
+/// q>> (def reals ("bool" "int" "float"))
+/// q>> (if (istype reals z) 0 1) ; evaluates to 1
+/// ```
+#[builtin(name = "istype", alias = "~?")]
 pub fn fn_istype(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -809,6 +1320,21 @@ pub fn fn_istype(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return Ok(qbool!(ret));
 }
 
+/// Get the type(s) of one or more values as strs. If one value is passed, the
+/// result is returned as a single string, otherwise a list of strings is
+/// returned. Possible return values are `"bool"`, `"int"`, `"float"`,
+/// `"complex"`, `"list"`, `"str"`, `"function"`.
+/// Alias: `?~`
+///
+/// Expected form:
+/// `(type <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (type true) ; evaluates to "bool"
+/// q>> (type true 1 1.0 1i) ; evaluates to ("bool" "int" "float" "complex")
+/// ```
+#[builtin(name = "type", alias = "?~")]
 pub fn fn_type(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.is_empty() {
         return Err(qerr_fmt!(
@@ -831,26 +1357,98 @@ pub fn fn_type(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
  * type-casting
  */
 
+/// Primitive Boolean type. Can be used as a function to cast other values to
+/// this type or parse strs as such. If a single list is passed, operates on the
+/// contents of the list instead of the list itself.
+///
+/// Expected form:
+/// `(bool <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (bool 0 1.0 1i) ; evaluates to (false true true)
+/// q>> (bool "false") ; evaluates to false
+/// ```
+#[builtin(name = "bool")]
 pub fn fn_bool(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return typecast(qbool!(), &env.eval_multi(args)?);
 }
 
+/// Signed 64-bit integer type. Can be used as a function to cast other values
+/// to this type or parse strs as such. If a single list is passed, operates on
+/// the contents of the list instead of the list itself.
+///
+/// Expected form:
+/// `(int <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (int true false 5.5) ; evaluates to (1 0 5)
+/// q>> (int "8") ; evaluates to 8
+/// ```
+#[builtin(name = "int")]
 pub fn fn_int(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return typecast(qint!(), &env.eval_multi(args)?);
 }
 
+/// 64-bit floating-point type. Can be used as a function to cast other values
+/// to this type or parse strs as such. If a single list is passed, operates on
+/// the contents of the list instead of the list itself.
+///
+/// Expected form:
+/// `(float <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (float true 5) ; evaluates to (0.0 5.0)
+/// q>> (float "3.14159") ; evaluates to 3.14159
+/// ```
+#[builtin(name = "float")]
 pub fn fn_float(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return typecast(qfloat!(), &env.eval_multi(args)?);
 }
 
+/// 128-bit complex floating-point type. Can be used as a function to cast other
+/// values to this type or parse strs as such. If a single list is passed,
+/// operates on the contents of the list instead of the list itself.
+///
+/// Expected form:
+/// `(complex <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (complex true 5 5.0) ; evaluates to (1.0+0i 5.0+0i 5.0+0i)
+/// q>> (complex "2+8i") ; evaluates to 2.0+8.0i
+/// ```
+#[builtin(name = "complex")]
 pub fn fn_complex(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return typecast(qcomplex!(), &env.eval_multi(args)?);
 }
 
+/// List type. Can be used as a function to pack all arguments into a list.
+///
+/// Expected form:
+/// `(list <values>...)`
+///
+/// Example:
+/// q>> (list true 5 5.0 5i "hello") ; evaluates to (true 5 5.0 5i "hello")
+#[builtin(name = "list")]
 pub fn fn_list(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return Ok(qlist!(env.eval_multi(args)?));
 }
 
+/// String type. Can be used as a function to cast all arguments to strs using a
+/// default formatter.
+///
+/// Expected form:
+/// `(str <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (str 5.0) ; evaluates to "5"
+/// q>> (str "hello" 1.0546 10i) ; evaluates to ("hello" "1.0546" "0+10i")
+/// ```
+#[builtin(name = "str")]
 pub fn fn_str(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return typecast(qstr!(), &env.eval_multi(args)?);
 }
@@ -859,6 +1457,22 @@ pub fn fn_str(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
  * arithmetic
  */
 
+/// Addition operation. Supports any number of arguments, retuning the total
+/// sum. If no arguments are passed, returns 0. The type of the returned value
+/// is the most general of all argument types. If only a single list is passed,
+/// this function is applied to its contents.
+/// Alias: `+`
+///
+/// Expected form:
+/// `(add <numbers>...)`
+///
+/// Example:
+/// ```text
+/// q>> (add 5 5 5) ; evaluates to 15
+/// q>> (add 5 5 5.0) ; evaluates to 15.0
+/// q>> (add 5 5.0 5.0+0i) ; evaluates to 15.0+0i
+/// ```
+#[builtin(name = "add", alias = "+")]
 pub fn fn_add(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn do_add(args: &[QExp]) -> QResult<QExp> {
         if args.len() == 1 {
@@ -877,6 +1491,22 @@ pub fn fn_add(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return do_add(&env.eval_multi(args)?);
 }
 
+/// Subtraction operation. Requires at least one argument, subtracting all
+/// following arguments from the first. The type of the returned value is the
+/// most general of all argument types. If only a single list is passed, this
+/// function is applied to its contents.
+/// Alias: `-`
+///
+/// Expected form:
+/// `(sub <numbers>...)`
+///
+/// Example:
+/// ```text
+/// q>> (sub 5 5 5) ; evaluates to -10
+/// q>> (sub 5 5 5.0) ; evaluates to -10.0
+/// q>> (sub 5 5.0 5.0+0i) ; evaluates to -10.0+0i
+/// ```
+#[builtin(name = "sub", alias = "-")]
 pub fn fn_sub(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn do_sub(args: &[QExp]) -> QResult<QExp> {
         if args.len() == 1 {
@@ -901,6 +1531,22 @@ pub fn fn_sub(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return do_sub(&env.eval_multi(args)?);
 }
 
+/// Multiplication operation. Supports any number of arguments, returning the
+/// total product. If no arguments are passed, returns 1. The type of the
+/// returned value is the most general of all argument types. If only a single
+/// list is passed, this function is applied to its contents.
+/// Alias: `*`
+///
+/// Expected form:
+/// `(mul <numbers>...)`
+///
+/// Example:
+/// ```text
+/// q>> (mul 5 5 5) ; evaluates to 125
+/// q>> (mul 5 5 5.0) ; evaluates to 125.0
+/// q>> (mul 5 5.0 5.0+0i) ; evaluates to 125.0+0i
+/// ```
+#[builtin(name = "mul", alias = "*")]
 pub fn fn_mul(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn do_mul(args: &[QExp]) -> QResult<QExp> {
         if args.len() == 1 {
@@ -919,6 +1565,22 @@ pub fn fn_mul(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return do_mul(&env.eval_multi(args)?);
 }
 
+/// Division operation. Requires at least one argument, dividing the first by
+/// all following arguments. The type of the returned value is either a float or
+/// a complex, depending on the types of the arguments. If only a single list is
+/// passed, this function is applied to its contents.
+/// Alias: `/`
+///
+/// Expected form:
+/// `(div <numbers>...)`
+///
+/// Example:
+/// ```text
+/// q>> (div 5 5 5) ; evaluates to 0.2
+/// q>> (div 5 5 5.0) ; evaluates to 0.2
+/// q>> (div 5 5.0 5.0+0i) ; evaluates to 0.2+0i
+/// ```
+#[builtin(name = "div", alias = "/")]
 pub fn fn_div(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn do_div(args: &[QExp]) -> QResult<QExp> {
         if args.len() == 1 {
@@ -944,6 +1606,24 @@ pub fn fn_div(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return do_div(&env.eval_multi(args)?);
 }
 
+/// Integer division operation, where a floor operator is applied after each
+/// pairwise operation. Requires at least one argument, integer-dividing the
+/// first by all following arguments. Does not accept complex-valued arguments.
+/// The type of the returned value is always an int. If only a single list is
+/// passed, this function is applied to its contents.
+/// Alias: `//`
+///
+/// Expected form:
+/// `(idiv <numbers>...)`
+///
+/// Example:
+/// ```text
+/// q>> (idiv 5 2) ; evaluates to 2
+/// q>> (idiv -5 2.0) ; evaluates to -3
+/// q>> (idiv 5 2.0) ; evaluates to 2
+/// q>> (idiv 5 2.0 2.2) ; evaluates to 0
+/// ```
+#[builtin(name = "idiv", alias = "//")]
 pub fn fn_idiv(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn do_idiv(args: &[QExp]) -> QResult<QExp> {
         if args.len() == 1 {
@@ -977,6 +1657,21 @@ pub fn fn_idiv(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
  * boolean comparisons
  */
 
+/// Logical AND operator, short-circuited and extended to n >= 0 inputs. Returns
+/// `true` if all inputs are booleans with positive value or if there are no
+/// inputs.
+/// Alias: `&&`
+///
+/// Expected form:
+/// `(and <inputs>...)`
+///
+/// Example:
+/// ```text
+/// q>> (and true true true) ; evaluates to true
+/// q>> (and true true false) ; evaluates to false
+/// q>> (and) ; evaluates to true
+/// ```
+#[builtin(name = "and", alias = "&&")]
 pub fn fn_and(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     for form in args.iter() {
         match env.eval(form)? {
@@ -989,6 +1684,21 @@ pub fn fn_and(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return Ok(qbool!(true));
 }
 
+/// Logical OR operator, short-circuited and extended to n >= 0 inputs. Returns
+/// `true` if all evaluated inputs are booleans and at least one of them has
+/// positive value.
+/// Alias: `||`
+///
+/// Expected form:
+/// `(or <inputs>...)`
+///
+/// Example:
+/// ```text
+/// q>> (or true true true) ; evaluates to true
+/// q>> (or true false false) ; evaluates to true
+/// q>> (or) ; evaluates to false
+/// ```
+#[builtin(name = "or", alias = "||")]
 pub fn fn_or(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     for form in args.iter() {
         match env.eval(form)? {
@@ -1001,6 +1711,20 @@ pub fn fn_or(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return Ok(qbool!(false));
 }
 
+/// Logical XOR operator, short-circuited and extended to n >= 0 inputs. Returns
+/// `true` if exactly one input is `true`, `false` otherwise.
+/// Alias: `^`
+///
+/// Expected form:
+/// `(xor <inputs>...)`
+///
+/// Example:
+/// ```text
+/// q>> (xor true false false) ; evaluates to true
+/// q>> (xor true true false) ; evaluates to false
+/// q>> (xor) ; evaluates to false
+/// ```
+#[builtin(name = "xor", alias = "^")]
 pub fn fn_xor(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     let mut has_true: bool = false;
     for form in args.iter() {
@@ -1018,6 +1742,27 @@ pub fn fn_xor(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return Ok(qbool!(has_true));
 }
 
+/// Equality comparison operator. Not to be confused with the `def`/`:=`
+/// assignment keyword. Returns `false` if there exists at least 1 argument that
+/// is not equal to the rest. Returns `true` if no arguments are passed. If only
+/// a single list is passed, operates on the contents of the list instead of the
+/// list itself. Note that two numbers of different types (e.g. 5 and 5.0) are
+/// *not* considered equal, even if their numerical values are the same. To
+/// perform such a comparison, cast the values to the same type, e.g.
+/// `(= (float 5 5.0))`.
+/// Alias: `=`
+///
+/// Expected form:
+/// `(eq <args>...)`
+///
+/// Example:
+/// ```text
+/// q>> (def a 5)
+/// q>> (eq a 5) ; evaluates to true
+/// q>> (eq a 5 5.0) ; evaluates to false
+/// q>> (eq (float a 5 5.0)) ; evaluates to true
+/// ```
+#[builtin(name = "eq", alias = "=")]
 pub fn fn_eq(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn do_eq(args: &[QExp]) -> QResult<QExp> {
         if args.len() == 1 {
@@ -1041,6 +1786,26 @@ pub fn fn_eq(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return do_eq(&env.eval_multi(args)?);
 }
 
+/// Non-equality comparison operator. Returns `false` if at least two arguments
+/// are equal. Returns `true` if no arguments are passed. If only a single list
+/// is passed, operates on the contents of the list instead of the list itself.
+/// Note that two numbers of different types (e.g. 5 and 5.0) are *not*
+/// considered equal, even if their numerical values are the same. To perform
+/// such a comparison, cast the values to the same type, e.g.
+/// `(!= (float 5 5.0))`.
+/// Alias: `!=`
+///
+/// Expected form:
+/// `(neq <args>...)`
+///
+/// Example:
+/// ```text
+/// q>> (def a 5)
+/// q>> (neq a 5) ; evaluates to false
+/// q>> (neq a 5.0) ; evaluates to true
+/// q>> (neq (float a 5.0)) ; evaluates to false
+/// ```
+#[builtin(name = "neq", alias = "!=")]
 pub fn fn_neq(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn do_neq(args: &[QExp]) -> QResult<QExp> {
         if args.len() == 1 {
@@ -1064,6 +1829,23 @@ pub fn fn_neq(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return do_neq(&env.eval_multi(args)?);
 }
 
+/// Greater-than comparison operator. Returns `true` if the arguments are in
+/// monotonic, descending order, i.e. every element is greater than the one
+/// following it. Returns `true` if no arguments are passed. If only a single
+/// list is passed, operates on the contents of the list instead of the list
+/// itself.
+/// Alias: `>`
+///
+/// Expected form:
+/// `(gt <args>...)`
+///
+/// Example:
+/// ```text
+/// q>> (gt 5 4) ; evaluates to true
+/// q>> (gt 5 5 4) ; evaluates to false
+/// q>> (gt "c" "b" "a") ; evaluates to true
+/// ```
+#[builtin(name = "gt", alias = ">")]
 pub fn fn_gt(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn do_gt(args: &[QExp]) -> QResult<QExp> {
         if args.len() == 1 {
@@ -1088,6 +1870,23 @@ pub fn fn_gt(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return do_gt(&env.eval_multi(args)?);
 }
 
+/// Greater-than-or-equal-to comparison operator. Returns `true` if the
+/// arguments are in non-increasing order, i.e. there exists no element that is
+/// less than the one following it. Returns `true` if no arguments are passed.
+/// If only a single list is passed, operates on the contents of the list
+/// instead of the list itself.
+/// Alias: `>=`
+///
+/// Expected form:
+/// `(geq <args>...)`
+///
+/// Example:
+/// ```text
+/// q>> (geq 5 4) ; evaluates to true
+/// q>> (geq 5 5 4) ; evaluates to true
+/// q>> (geq "c" "b" "a") ; evaluates to true
+/// ```
+#[builtin(name = "geq", alias = ">=")]
 pub fn fn_geq(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn do_geq(args: &[QExp]) -> QResult<QExp> {
         if args.len() == 1 {
@@ -1112,6 +1911,23 @@ pub fn fn_geq(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return do_geq(&env.eval_multi(args)?);
 }
 
+/// Less-than comparison operator. Returns `true` if the arguments are in
+/// monotonic, ascending order, i.e. every element is less than the one
+/// following it. Returns `true` if no arguments are passed. If only a single
+/// list is passed, operates on the contents of the list instead of the list
+/// itself.
+/// Alias: `<`
+///
+/// Expected form:
+/// `(lt <args>...)`
+///
+/// Example:
+/// ```text
+/// q>> (gt 5 6) ; evaluates to true
+/// q>> (gt 5 5 6) ; evaluates to false
+/// q>> (gt "a" "b" "c") ; evaluates to true
+/// ```
+#[builtin(name = "lt", alias = "<")]
 pub fn fn_lt(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn do_lt(args: &[QExp]) -> QResult<QExp> {
         if args.len() == 1 {
@@ -1136,6 +1952,23 @@ pub fn fn_lt(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return do_lt(&env.eval_multi(args)?);
 }
 
+/// Less-than-or-equal-to comparison operator. Returns `true` if the arguments
+/// are in non-decreasing order, i.e. there exists no element that is greater
+/// than the one following it. Returns `true` if no arguments are passed. If
+/// only a single list is passed, operates on the contents of the list instead
+/// of the list itself.
+/// Alias: `<=`
+///
+/// Expected form:
+/// `(leq <args>...)`
+///
+/// Example:
+/// ```text
+/// q>> (leq 5 6) ; evaluates to true
+/// q>> (leq 5 5 6) ; evaluates to true
+/// q>> (leq "a" "b" "c") ; evaluates to true
+/// ```
+#[builtin(name = "leq", alias = "<=")]
 pub fn fn_leq(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn do_leq(args: &[QExp]) -> QResult<QExp> {
         if args.len() == 1 {
@@ -1164,6 +1997,20 @@ pub fn fn_leq(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
  * boolean accumulators
  */
 
+/// Logical AND accumulator on a list input: Returns `true` if all items in a
+/// list are `true`, `false` otherwise.
+/// Alias: `&&*`
+///
+/// Expected form:
+/// `(all (<values>...))`
+///
+/// Example:
+/// ```text
+/// q>> (def numbers (range 0 5)) ; (0 1 2 3 4)
+/// q>> (all (map (fn (n) (< n 10)) numbers)) ; evaluates to true
+/// q>> (all (map (fn (n) (< n 2)) numbers)) ; evaluates to false
+/// ```
+#[builtin(name = "all", alias = "&&*")]
 pub fn fn_all(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 1 {
         return Err(qerr_fmt!(
@@ -1185,6 +2032,20 @@ pub fn fn_all(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     };
 }
 
+/// Logical OR accumulator on a list input: Returns `true` if at least one item
+/// in a list is `true`, `false` otherwise.
+/// Alias: `||*`
+///
+/// Expected form:
+/// `(any (<values>...))`
+///
+/// Example:
+/// ```text
+/// q>> (def numbers (range 0 5)) ; (0 1 2 3 4)
+/// q>> (any (map (fn (n) (> n 10)) numbers)) ; evaluates to false
+/// q>> (any (map (fn (n) (> n 2)) numbers)) ; evaluates to true
+/// ```
+#[builtin(name = "any", alias = "||*")]
 pub fn fn_any(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 1 {
         return Err(qerr_fmt!(
@@ -1206,6 +2067,20 @@ pub fn fn_any(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     };
 }
 
+/// Logical XOR accumulator on a list input: Returns `true` if exactly one item
+/// in a list is `true`, `false` otherwise.
+/// Alias: `^*`
+///
+/// Expected form:
+/// `(xany (<values>...))`
+///
+/// Example:
+/// ```text
+/// q>> (def numbers (range 0 5)) ; (0 1 2 3 4)
+/// q>> (xany (map (fn (n) (> n 2)) numbers)) ; evaluates to false
+/// q>> (xany (map (fn (n) (= n 2)) numbers)) ; evaluates to true
+/// ```
+#[builtin(name = "xany", alias = "^*")]
 pub fn fn_xany(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() > 1 {
         return Err(qerr_fmt!(
@@ -1236,6 +2111,18 @@ pub fn fn_xany(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
  * iterable creation
  */
 
+/// Construct a list of integers on a semi-open interval.
+/// Alias: `..`
+///
+/// Expected form:
+/// `(range <start> <stop>)`
+///
+/// Example:
+/// ```text
+/// q>> (range 5 15) ; evaluates to (5 6 7 8 9 10 11 12 13 14)
+/// q>> (range 5 -5) ; evaluates to (5 4 3 2 1 0 -1 -2 -3 -4)
+/// ```
+#[builtin(name = "range", alias = "..")]
 pub fn fn_range(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -1256,6 +2143,18 @@ pub fn fn_range(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     };
 }
 
+/// Construct a list of integers on a closed interval.
+/// Alias: `..=`
+///
+/// Expected form:
+/// `(range-inc <start> <stop>)`
+///
+/// Example:
+/// ```text
+/// q>> (range-inc 5 15) ; evaluates to (5 6 7 8 9 10 11 12 13 14 15)
+/// q>> (range-inc 5 -5) ; evaluates to (5 4 3 2 1 0 -1 -2 -3 -4 -5)
+/// ```
+#[builtin(name = "range-inc", alias = "..=")]
 pub fn fn_range_inc(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -1276,6 +2175,18 @@ pub fn fn_range_inc(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     };
 }
 
+/// Construct a new list or str by repeating the contents of another `n` times.
+/// Alias: `#=`
+///
+/// Expected form:
+/// `(repeat <n> <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (repeat 3 (1 2 3)) ; evaluates to (1 2 3 1 2 3 1 2 3)
+/// q>> (repeat 2 "hello") ; evaluates to "hellohello"
+/// ```
+#[builtin(name = "repeat", alias = "#=")]
 pub fn fn_repeat(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -1301,6 +2212,18 @@ pub fn fn_repeat(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
  * iterable accumulation
  */
 
+/// Return the number of items in a list or characters in a str.
+/// Alias: `#`
+///
+/// Expected form:
+/// `(length <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (length (range 0 10)) ; evaluates to 10
+/// q>> (length "hello") ; evaluates to 5
+/// ```
+#[builtin(name = "length", alias = "#")]
 pub fn fn_length(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 1 {
         return Err(qerr_fmt!(
@@ -1313,6 +2236,20 @@ pub fn fn_length(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     };
 }
 
+/// Iterate over a list or str, folding each element into an accumulator by
+/// applying a function. The function should take two arguments with the first
+/// being the accumulator.
+/// Alias: `@.`
+///
+/// Expected form:
+/// `(fold <start> <function> <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (defn f (acc x) (if (= (% 2 x) 0) (+ acc x) (* acc x)))
+/// q>> (fold 1 f (range 0 4)) ; evaluates to 9
+/// ```
+#[builtin(name = "fold", alias = "@.")]
 pub fn fn_fold(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 3 {
         return Err(qerr_fmt!(
@@ -1323,7 +2260,7 @@ pub fn fn_fold(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         = Indexable::from_qexp(env.eval(args.get(2).unwrap())?)
         .map_err(|_| qerr!("fold: third arg must be a list or str"))?;
     return match env.eval(args.get(1).unwrap())? {
-        qfunc!(_, f) => idxable.fold(&start, |args: &[QExp]| f(env, args)),
+        qfunc!(f) => idxable.fold(&start, |args: &[QExp]| (f.f)(env, args)),
         qlambda!(ll) => {
             let f = |args: &[QExp]| {
                 let mut ll_env: QEnv = ll.env(args, env)?;
@@ -1335,6 +2272,18 @@ pub fn fn_fold(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     };
 }
 
+/// Find the minimum of a list or str using the `<` function.
+/// Alias: `<:`
+///
+/// Expected form:
+/// `(min <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (min (range 5 -5)) ; evaluates to -4
+/// q>> (min "hello world") ; evaluates to " "
+/// ```
+#[builtin(name = "min", alias = "<:")]
 pub fn fn_min(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 1 {
         return Err(qerr_fmt!(
@@ -1347,6 +2296,18 @@ pub fn fn_min(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("min"));
 }
 
+/// Find the maximum of a list or str using the `>` function.
+/// Alias: `:>`
+///
+/// Expected form:
+/// `(max <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (max (range 5 -5)) ; evaluates to 5
+/// q>> (max "hello world") ; evaluates to "w"
+/// ```
+#[builtin(name = "max", alias = ":>")]
 pub fn fn_max(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 1 {
         return Err(qerr_fmt!(
@@ -1359,6 +2320,26 @@ pub fn fn_max(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("max"));
 }
 
+/// Select an extremum element through element-wise comparisons with an
+/// accumulator using a comparison function. The function should take two
+/// arguments, with the first being the trial element and the second being the
+/// accumulator, and return `true` if the trial element is to replace the
+/// accumulator, `false` otherwise. The initial value of the accumulator is set
+/// to be the first element of the list or str. To set a different initial
+/// value, use `fold` instead.
+/// Alias: `*@.`
+///
+/// Expected form:
+/// `(select-by <comparison function> <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (select-by < (range 5 -5)) ; evaluates -4
+/// q>> ; find the maximum number in a list divisible by 3
+/// q>> (defn maxdiv3 (x acc) (and (= (mod 3 x) 0) (> x acc)))
+/// q>> (select-by maxdiv3 (0 5 3 7 5 6 6 9 7 3 5 12 3 10)) ; evaluates to 12
+/// ```
+#[builtin(name = "select-by", alias = "*@.")]
 pub fn fn_select_by(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
    if args.len() != 2 {
        return Err(qerr_fmt!(
@@ -1368,8 +2349,8 @@ pub fn fn_select_by(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
        = Indexable::from_qexp(env.eval(args.get(1).unwrap())?)
        .map_err(|_| qerr!("select-by: second arg must be a list or str"))?;
     return match env.eval(args.get(0).unwrap())? {
-        qfunc!(_, f) => {
-            idxable.select_by(|args: &[QExp]| f(env, args))
+        qfunc!(f) => {
+            idxable.select_by(|args: &[QExp]| (f.f)(env, args))
                 .map_err(|e| e.prepend_source("select-by"))
         },
         qlambda!(ll) => {
@@ -1388,6 +2369,19 @@ pub fn fn_select_by(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
  * iterable slicing and access
  */
 
+/// Return the item of a list or character of a str at an index. Indicies must
+/// be non-negative integers.
+/// Alias: `.`
+///
+/// Expected form:
+/// `(get <index> <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (get 3 (range-inc 1 10)) ; evaluates to 4
+/// q>> (get 4 "hello world") ; evaluates to "o"
+/// ```
+#[builtin(name = "get", alias = ".")]
 pub fn fn_get(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -1410,6 +2404,19 @@ pub fn fn_get(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         ));
 }
 
+/// Return a copy of a list where values at given indices have been set to new
+/// ones. Each argument following the list must be a list of length 2 where the
+/// first item is the index and the second is the value.
+/// Alias: `.:=`
+///
+/// Expected form:
+/// `(set <list> (<index> <value>)...)`
+///
+/// Example:
+/// ```text
+/// q>> (set (range 0 10) (0 3) (7 10)) ; evaluates to (3 1 2 3 4 5 6 10 8 9)
+/// ```
+#[builtin(name = "set", alias = ".:=")]
 pub fn fn_set(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() < 2 {
         return Err(qerr_fmt!(
@@ -1446,6 +2453,19 @@ pub fn fn_set(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("set"));
 }
 
+/// Return a slice of a list or substring of a str over a semi-open range of
+/// indices.
+/// Alias: `--`
+///
+/// Expected form:
+/// `(slice <start> <stop> <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (slice 2 7 (range 10 0)) ; evaluates to (8 7 6 5 4)
+/// q>> (slice 2 7 "hello world") ; evaluates to "llo w"
+/// ```
+#[builtin(name = "slice", alias = "--")]
 pub fn fn_slice(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 3 {
         return Err(qerr_fmt!(
@@ -1476,6 +2496,19 @@ pub fn fn_slice(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("slice"));
 }
 
+/// Return a slice of a list or substring of a str over a closed range of
+/// indices.
+/// Alias: `--=`
+///
+/// Expected form:
+/// `(slice-inc <start> <stop> <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (slice-inc 2 7 (range 10 0)) ; evaluates to (8 7 6 5 4 3)
+/// q>> (slice-inc 2 7 "hello world") ; evaluates to "llo wo"
+/// ```
+#[builtin(name = "slice-inc", alias = "--=")]
 pub fn fn_slice_inc(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 3 {
         return Err(qerr_fmt!(
@@ -1506,6 +2539,19 @@ pub fn fn_slice_inc(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("slice-inc"));
 }
 
+/// Portmanteau of slice and step-by: Return a slice of a list or substring of a
+/// str over a semi-open range of indices with a given step size.
+/// Alias: `~~`
+///
+/// Expected form:
+/// `(slice-by <start> <stop> <step size> <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (slice-by 2 7 2 (range 10 0)) ; evaluates to (8 6 4)
+/// q>> (slice-by 2 7 2 "hello world") ; evaluates to "low"
+/// ```
+#[builtin(name = "slice-by", alias = "~~")]
 pub fn fn_slice_by(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 4 {
         return Err(qerr_fmt!(
@@ -1543,6 +2589,19 @@ pub fn fn_slice_by(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("slice-by"));
 }
 
+/// Portmanteau of slice-inc and step-by: Return a slice of a list or substring
+/// of a str over a closed range of indices with a given step size.
+/// Alias: `~~=`
+///
+/// Expected form:
+/// `(slice-inc-by <start> <stop> <step size> <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (slice-by 2 8 2 (range 10 0)) ; evaluates to (8 6 4 2)
+/// q>> (slice-by 2 8 2 "hello world") ; evaluates to "lowr"
+/// ```
+#[builtin(name = "slice-inc-by", alias = "~~=")]
 pub fn fn_slice_inc_by(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 4 {
         return Err(qerr_fmt!(
@@ -1582,6 +2641,19 @@ pub fn fn_slice_inc_by(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("slice-inc-by"));
 }
 
+/// Select items from a list or characters from a str at specific indices and
+/// return them in a new list or str.
+/// Alias: `.*`
+///
+/// Expected form:
+/// `(pick (<index>...) <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (pick (0 5 3 3 6) (range 10 0)) ; evaluates to (10 5 7 7 4)
+/// q>> (pick (0 5 3 3 6) "hello world") ; evaluates to "h llw"
+/// ```
+#[builtin(name = "pick", alias = ".*")]
 pub fn fn_pick(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -1621,6 +2693,19 @@ pub fn fn_pick(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("pick"));
 }
 
+/// Get the item in a list or character in a str at index 0. Equivalent to
+/// `(get 0 ...)`.
+/// Alias: `.-`
+///
+/// Expected form:
+/// `(first <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (first (range 0 10)) ; evaluates to 0
+/// q>> (first "hello world") ; evaluates to "h"
+/// ```
+#[builtin(name = "first", alias = ".-")]
 pub fn fn_first(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 1 {
         return Err(qerr_fmt!(
@@ -1633,6 +2718,43 @@ pub fn fn_first(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("first"));
 }
 
+/// Get all items in a list or characters in a str after that at index 0.
+/// Alias: `.!-`
+///
+/// Expected form:
+/// `(rest <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (rest (range 0 10)) ; evaluates to (1 2 3 4 5 6 7 8 9)
+/// q>> (rest "hello world") ; "ello world"
+/// ```
+#[builtin(name = "rest", alias = ".!-")]
+pub fn fn_rest(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    if args.len() != 1 {
+        return Err(qerr_fmt!(
+            "rest: expected 1 arg but got {}", args.len()));
+    }
+    let idxable
+        = Indexable::from_qexp(env.eval(args.get(0).unwrap())?)
+        .map_err(|e| e.prepend_source("rest"))?;
+    return idxable.rest()
+        .map_err(|e| e.prepend_source("rest"));
+}
+
+/// Take the first `n` items in a list or characters in a str, discarding the
+/// rest.
+/// Alias: `~.`
+///
+/// Expected form:
+/// `(take <n> <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (take 5 (range 0 10)) ; evaluates to (0 1 2 3 4)
+/// q>> (take 5 "hello world") ; evaluates to "hello"
+/// ```
+#[builtin(name = "take", alias = "~.")]
 pub fn fn_take(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -1655,6 +2777,21 @@ pub fn fn_take(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("take"));
 }
 
+/// Iterate from the start of a list or str, taking all items or characters for
+/// which a function returns `true`, discarding all after and including the
+/// first for which the function returns `false`. The function must return a
+/// bool for all inputs.
+/// Alias: `~.@`
+///
+/// Expected form:
+/// `(take-while <predicate function> <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (take-while (fn (n) (< n 3)) (0 1 3 2 2 5)) ; evaluates to (0 1)
+/// q>> (take-while (fn (c) (!= c " ") "hello world") ; evaluates to "hello"
+/// ```
+#[builtin(name = "take-while", alias = "~.@")]
 pub fn fn_take_while(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -1666,8 +2803,8 @@ pub fn fn_take_while(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
             qerr!("take-while: second arg must be a list or str")
         })?;
     return match env.eval(args.get(0).unwrap())? {
-        qfunc!(_, f) => {
-            idxable.take_while(|args: &[QExp]| f(env, args))
+        qfunc!(f) => {
+            idxable.take_while(|args: &[QExp]| (f.f)(env, args))
                 .map_err(|e| e.prepend_source("take-while"))
         },
         qlambda!(ll) => {
@@ -1682,6 +2819,19 @@ pub fn fn_take_while(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     };
 }
 
+/// Get the item in a list or character in a str at index N - 1, where N is the
+/// length of the list or str. Equivalent to (get (- N 1) ...).
+/// Alias: `-.`
+///
+/// Expected form:
+/// `(last <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (last (range 0 10)) ; evaluates to 9
+/// q>> (last "hello world") ; evaluates to "d"
+/// ```
+#[builtin(name = "last", alias = "-.")]
 pub fn fn_last(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 1 {
         return Err(qerr_fmt!(
@@ -1694,6 +2844,19 @@ pub fn fn_last(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("last"));
 }
 
+/// Discard the first `n` items in a list or characters in a str, keeping the
+/// rest.
+/// Alias: `.~`
+///
+/// Expected form:
+/// `(skip <n> <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (skip 5 (range 0 10)) ; evaluates to (5 6 7 8 9)
+/// q>> (skip 5 "hello world") ; evaluates to " world"
+/// ```
+#[builtin(name = "skip", alias = ".~")]
 pub fn fn_skip(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -1716,6 +2879,21 @@ pub fn fn_skip(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("skip"));
 }
 
+/// Iterate from the start of a list or str, skipping all items or characters
+/// for which a function returns `true`, keeping all after and including the
+/// first for which the function returns `false`. The function must return a
+/// bool for all inputs.
+/// Alias: `.~@`
+///
+/// Expected form:
+/// `(skip-while <predicate function> <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (skip-while (fn (n) (< n 3)) (0 1 3 2 2 5)) ; evaluates to (3 2 2 5)
+/// q>> (skip-while (fn (c) (!= c " ")) "hello world") ; evaluates to " world"
+/// ```
+#[builtin(name = "skip-while", alias = ".~@")]
 pub fn fn_skip_while(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -1727,8 +2905,8 @@ pub fn fn_skip_while(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
             qerr!("skip-while: second arg must be a list or str")
         })?;
     return match env.eval(args.get(0).unwrap())? {
-        qfunc!(_, f) => {
-            idxable.skip_while(|args: &[QExp]| f(env, args))
+        qfunc!(f) => {
+            idxable.skip_while(|args: &[QExp]| (f.f)(env, args))
                 .map_err(|e| e.prepend_source("skip-while"))
         },
         qlambda!(ll) => {
@@ -1747,6 +2925,18 @@ pub fn fn_skip_while(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
  * iterable transformation
  */
 
+/// Step through a list or str with a given step size.
+/// Alias `~`
+///
+/// Expected form:
+/// `(step-by <step size> <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (step-by 3 (range 0 15)) ; evaluates to (0 3 6 9 12)
+/// q>> (step-by 3 "hello world") ; evaluates to "hlwl"
+/// ```
+#[builtin(name = "step-by", alias = "~")]
 pub fn fn_step_by(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -1766,6 +2956,19 @@ pub fn fn_step_by(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("step-by"));
 }
 
+/// Convert each item in a list or character in a str to a two-item list
+/// containing the item or character and its index.
+/// Alias: `##`
+///
+/// Expected form:
+/// `(enumerate <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (enumerate (1 1.0 1i)) ; evaluates to ((1 1) (2 1.0) (3 0.0+1.0i))
+/// q>> (enumerate "abc") ; evaluates to ((0 "a") (1 "b") (2 "c"))
+/// ```
+#[builtin(name = "enumerate", alias = "##")]
 pub fn fn_enumerate(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 1 {
         return Err(qerr_fmt!(
@@ -1778,6 +2981,18 @@ pub fn fn_enumerate(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("enumerate"));
 }
 
+/// Reverse the order of a list or str.
+/// Alias: `<>`
+///
+/// Expected form:
+/// `(reverse <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (reverse (range 0 10)) ; evaluates to (9 8 7 6 5 4 3 2 1 0)
+/// q>> (reverse "hello world") ; evaluates to "dlrow olleh"
+/// ```
+#[builtin(name = "reverse", alias = "<>")]
 pub fn fn_reverse(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 1 {
         return Err(qerr_fmt!(
@@ -1790,6 +3005,20 @@ pub fn fn_reverse(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("reverse"));
 }
 
+/// Shift the positions of items in a list or characters in a str by a constant
+/// offset n, wrapping around the ends; i.e. move the item at index k to new
+/// index (k + n) % N, where N is the length of the list or str.
+/// Alias: `<#>`
+///
+/// Expected form:
+/// `(cycle <offset> <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (cycle 2 (range 0 10)) ; evaluates to (8 9 0 1 2 3 4 5 6 7)
+/// q>> (cycle 2 "hello world") ; evaluates to "ldhello wor"
+/// ```
+#[builtin(name = "cycle", alias = "<#>")]
 pub fn fn_cycle(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -1806,6 +3035,19 @@ pub fn fn_cycle(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("cycle"));
 }
 
+/// Apply a function to each item of a list or character of a str and return the
+/// results in a list.
+/// Alias: `@`
+///
+/// Expected form:
+/// `(map <function> <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (map (fn (n) (* n n)) (range 0 8)) ; evaluates to (0 1 4 9 25 36 49 64)
+/// q>> (map (fn (c) (= c "a")) "abcd") ; evaluates to (true false false false)
+/// ```
+#[builtin(name = "map", alias = "@")]
 pub fn fn_map(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -1815,8 +3057,8 @@ pub fn fn_map(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         = Indexable::from_qexp(env.eval(args.get(1).unwrap())?)
         .map_err(|_| qerr!("map: second arg must be a list or str"))?;
     return match env.eval(args.get(0).unwrap())? {
-        qfunc!(_, f) => {
-            idxable.map(|args: &[QExp]| f(env, args))
+        qfunc!(f) => {
+            idxable.map(|args: &[QExp]| (f.f)(env, args))
                 .map_err(|e| e.prepend_source("map"))
         },
         qlambda!(ll) => {
@@ -1831,6 +3073,20 @@ pub fn fn_map(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     };
 }
 
+/// Apply a function to each item of a list or character of a str and discard
+/// all for which the function returns `false`. The function must return a bool
+/// for all inputs.
+/// Alias: `@!`
+///
+/// Expected form:
+/// `(filter <predicate function> <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (filter (fn (n) (= (% 3 n) 0)) (range 0 10)) ; evaluates to (0 3 6 9)
+/// q>> (filter (fn (c) (= c "l")) "hello world") ; evaluates to "lll"
+/// ```
+#[builtin(name = "filter", alias = "@!")]
 pub fn fn_filter(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -1840,8 +3096,8 @@ pub fn fn_filter(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         = Indexable::from_qexp(env.eval(args.get(1).unwrap())?)
         .map_err(|_| qerr!("filter: second arg must be a list or str"))?;
     return match env.eval(args.get(0).unwrap())? {
-        qfunc!(_, f) => {
-            idxable.filter(|args: &[QExp]| f(env, args))
+        qfunc!(f) => {
+            idxable.filter(|args: &[QExp]| (f.f)(env, args))
                 .map_err(|e| e.prepend_source("filter"))
         },
         qlambda!(ll) => {
@@ -1856,6 +3112,20 @@ pub fn fn_filter(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     };
 }
 
+/// Reduce a list or str down to only unique items or characters. If two
+/// elements are equal, the element nearer to the start of the list or str is
+/// kept; order is otherwise maintained.
+/// Alias: `*!=`
+///
+/// Expected form:
+/// `(unique <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (unique (true 1 1 5i false true)) ; evaluates to (true 1 5i false)
+/// q>> (unique "hello world") ; evaluates to "helo wrd"
+/// ```
+#[builtin(name = "unique", alias = "*!=")]
 pub fn fn_unique(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 1 {
         return Err(qerr_fmt!(
@@ -1868,6 +3138,18 @@ pub fn fn_unique(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("unique"));
 }
 
+/// Recursively unpack nested lists so that all items lie next to each other in
+/// a single list.
+/// Alias: `__`
+///
+/// Expected form:
+/// `(flatten <list>)`
+///
+/// Example:
+/// ```text
+/// q>> (flatten ((1 2 3) (4 5 6) (7 8 9))) ; evaluates to (1 2 3 4 5 6 7 8 9)
+/// ```
+#[builtin(name = "flatten", alias = "__")]
 pub fn fn_flatten(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 1 {
         return Err(qerr_fmt!(
@@ -1880,6 +3162,19 @@ pub fn fn_flatten(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("flatten"));
 }
 
+/// Sort a list or str in ascending order using the `<` function. This sort is
+/// stable and performs in O(n log(n)) time.
+/// Alias: `<*`
+///
+/// Expected form:
+/// `(sort <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (sort (4 7 3 5 5 2 7 9 4 6 8)) ; evaluates to (2 3 4 4 5 5 6 7 7 8 9)
+/// q>> (sort "hello world") ; evaluates to " dehllloorw"
+/// ```
+#[builtin(name = "sort", alias = "<*")]
 pub fn fn_sort(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 1 {
         return Err(qerr_fmt!(
@@ -1892,6 +3187,21 @@ pub fn fn_sort(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("sort"));
 }
 
+/// Sort a list or str using a given comparison function. The function should
+/// take two arguments, x and y, and return `true` if x should come before y,
+/// `false` otherwise.
+/// Alias: `<@`
+///
+/// Expected form:
+/// `(sort-by <comparison function> <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (sort-by > (7 3 5 5 2 7 9 4 6 8)) ; evaluates to (9 8 7 7 6 5 5 4 3 2)
+/// q>> (defn listmax (a b) (> (max a) (max b)))
+/// q>> (sort-by listmax ((1 5) (6 2) (0 9))) ; evaluates to ((0 9) (6 2) (1 5))
+/// ```
+#[builtin(name = "sort-by", alias = "<@")]
 pub fn fn_sort_by(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -1901,8 +3211,8 @@ pub fn fn_sort_by(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         = Indexable::from_qexp(env.eval(args.get(1).unwrap())?)
         .map_err(|_| qerr!("sort-by: second arg must be a list or str"))?;
     return match env.eval(args.get(0).unwrap())? {
-        qfunc!(_, f) => {
-            idxable.sort_by(|args: &[QExp]| f(env, args))
+        qfunc!(f) => {
+            idxable.sort_by(|args: &[QExp]| (f.f)(env, args))
                 .map_err(|e| e.prepend_source("sort-by"))
         },
         qlambda!(ll) => {
@@ -1917,6 +3227,26 @@ pub fn fn_sort_by(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     };
 }
 
+/// Perform a series of permutations on a list X. Permutations are described
+/// by n-item lists of indices (i_1 i_2 ... i_n) where the presence of an index
+/// i_k indicates that the element in X at i_k is to be replaced by the element
+/// at i_{k - 1}. The element at i_1 will be replaced by the element at i_n.
+/// Each permutation can contain each available index at most once.
+/// Alias: `.~.`
+///
+/// Expected form:
+/// `(permute <list> <permutations>...)`
+///
+/// Example:
+/// ```text
+/// q>> ; simple swaps
+/// q>> (permute (range 0 5) (0 4) (2 3)) ; evaluates to (4 1 3 2 0)
+/// q>> ; cyclic permutations
+/// q>> (permute ("a" "b" "c") (0 1 2)) ; evaluates to ("c" "a" "b")
+/// q>> ; non-total cyclic permutations
+/// q>> (permute (range 0 10) (0 2 4 6)) ; evaluates to (6 1 0 3 2 5 4 7 8 9)
+/// ```
+#[builtin(name = "permute", alias = ".~.")]
 pub fn fn_permute(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() < 2 {
         return Err(qerr_fmt!(
@@ -1958,6 +3288,19 @@ pub fn fn_permute(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
  * iterable division
  */
 
+/// Divide a list or str into two pieces with the first containing the first `n`
+/// items or characters and the second containing the rest.
+/// Alias: `|.`
+///
+/// Expected form:
+/// `(split-at <n> <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (split-at 7 (range 0 10)) ; evaluates to ((0 1 2 3 4 5 6) (7 8 9))
+/// q>> (split-at 7 "hello world") ; evaluates to ("hello w" "orld")
+/// ```
+#[builtin(name = "split-at", alias = "|.")]
 pub fn fn_split_at(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -1982,6 +3325,22 @@ pub fn fn_split_at(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("split-at"));
 }
 
+/// Iterate from the start of a list or str, splitting into slices or substrings
+/// on each item or character for which a function returns `true`. Matched
+/// elements are discarded.
+/// Alias: `|@`
+///
+/// Expected form:
+/// `(split-on <matching function> <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (defn div3 (n) (= (mod 3 n) 0))
+/// q>> (split-on div3 (range 0 5)) ; evaluates to (() (1 2) (4))
+/// q>> (defn is_space (c) (= c " "))
+/// q>> (split-on is_space "hello world"); evaluates to ("hello" "world")
+/// ```
+#[builtin(name = "split-on", alias = "|@")]
 pub fn fn_split_on(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -1993,8 +3352,8 @@ pub fn fn_split_on(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
             qerr!("split-on: second arg must eb a list or str")
     })?;
     return match env.eval(args.get(0).unwrap())? {
-        qfunc!(_, f) => {
-            idxable.split_on(|args: &[QExp]| f(env, args))
+        qfunc!(f) => {
+            idxable.split_on(|args: &[QExp]| (f.f)(env, args))
                 .map_err(|e| e.prepend_source("split-on"))
         },
         qlambda!(ll) => {
@@ -2009,6 +3368,22 @@ pub fn fn_split_on(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     };
 }
 
+/// Iterate from the start of a list or str, splitting into slices or substrings
+/// on each item or character for which a function returns `true`. Matched
+/// elements are contained in the previous slice or substring.
+/// Alias: `|@=`
+///
+/// Expected forms:
+/// `(split-on-inc <matching function> <list or str>)`
+///
+/// Example:
+/// ```text
+/// q>> (defn div3 (n) (= (mod 3 n) 0))
+/// q>> (split-on-inc div3 (range 0 5)) ; evaluates to ((0) (1 2 3) (4))
+/// q>> (defn is_space (c) (= c " "))
+/// q>> (split-on-inc is_space "hello world"); evaluates to ("hello " "world")
+/// ```
+#[builtin(name = "split-on-inc", alias = "|@=")]
 pub fn fn_split_on_inc(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -2020,8 +3395,8 @@ pub fn fn_split_on_inc(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
             qerr!("split-on-inc: second arg must eb a list or str")
     })?;
     return match env.eval(args.get(0).unwrap())? {
-        qfunc!(_, f) => {
-            idxable.split_on_inc(|args: &[QExp]| f(env, args))
+        qfunc!(f) => {
+            idxable.split_on_inc(|args: &[QExp]| (f.f)(env, args))
                 .map_err(|e| e.prepend_source("split-on-inc"))
         },
         qlambda!(ll) => {
@@ -2040,6 +3415,19 @@ pub fn fn_split_on_inc(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
  * iterable addition
  */
 
+/// Append one or more items, one by one, to the end of a list or strs to the
+/// end of another str.
+/// Alias: `+.`
+///
+/// Expected form:
+/// `(append <list or str> <items>...)`
+///
+/// Example:
+/// ```text
+/// q>> (append (0 1 2) true 5i "abc") ; evaluates to (0 1 2 true 5i "abc")
+/// q>> (append "hello " "wo" "rld") ; evaluates to "hello world"
+/// ```
+#[builtin(name = "append", alias = "+.")]
 pub fn fn_append(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() < 2 {
         return Err(qerr_fmt!(
@@ -2052,6 +3440,20 @@ pub fn fn_append(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("append"));
 }
 
+/// Prepend one or more items, one by one, to the beginning of a list or strings
+/// to the beginning of another string. Note that this process inverts the order
+/// of arguments following the list or str.
+/// Alias: `.+`
+///
+/// Expected form:
+/// `(prepend <list or str> <items>...)`
+///
+/// Example:
+/// ```text
+/// q>> (prepend (0 1 2) true 5i "abc") ; evaluates to (5i true 0 1 2)
+/// q>> (prepend "hello " "wo" "rld") ; evaluates to "rldwohello "
+/// ```
+#[builtin(name = "prepend", alias = ".+")]
 pub fn fn_prepend(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() < 2 {
         return Err(qerr_fmt!(
@@ -2064,6 +3466,19 @@ pub fn fn_prepend(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("prepend"));
 }
 
+/// Insert one or more items into a list or strings into another string at a
+/// given index. The order of arguments following the list or str is preserved.
+/// Alias: `+.+`
+///
+/// Expected form:
+/// `(insert <index> <list or str> <items>...)`
+///
+/// Example:
+/// ```text
+/// q>> (insert 3 (range 0 5) true false) ; evaluates to (0 1 2 true false 3 4)
+/// q>> (insert 3 "hello world" "abc" "def") ; evaluates to "helabcdeflo world"
+/// ```
+#[builtin(name = "insert", alias = "+.+")]
 pub fn fn_insert(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() < 3 {
         return Err(qerr_fmt!(
@@ -2086,6 +3501,20 @@ pub fn fn_insert(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("insert"));
 }
 
+/// Concatenate two or more lists or strs in the order they are passed.
+/// Arguments must be either all lists or all strs. If only a single list is
+/// passed, operates on the contents of the list instead of the list itself.
+/// Alias: `++`
+///
+/// Expected form:
+/// `(join <lists or strs>...)`
+///
+/// Example:
+/// ```text
+/// q>> (join (1 2 3) (4 5 6) (7 8 9)) ; evaluates to (1 2 3 4 5 6 7 8 9)
+/// q>> (join "hello" " " "world") ; evaluates to "hello world"
+/// ```
+#[builtin(name = "join", alias = "++")]
 pub fn fn_join(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn do_join(args: &[QExp]) -> QResult<QExp> {
         if args.len() == 1 {
@@ -2125,6 +3554,21 @@ pub fn fn_join(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return do_join(&env.eval_multi(args)?);
 }
 
+/// Concatenate two or more lists or strs in the order they are passed,
+/// inserting an extra item at each join. Arguments after the item just be
+/// either all lists or all strs. If only a single list is passed, operates on
+/// the contents of the list instead of the list itself.
+/// Alias `+*+`
+///
+/// Expected form:
+/// `(join-with <item> <lists or strs>...)`
+///
+/// Example:
+/// ```text
+/// q>> (join-with 0 (1 2) (3 4) (5 6 7)) ; evaluates to (1 2 0 3 4 0 5 6 7)
+/// q>> (join-with " " "hello" "world") ; evaluates to "hello world"
+/// ```
+#[builtin(name = "join-with", alias = "+*+")]
 pub fn fn_join_with(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn do_join_with(item: &QExp, args: &[QExp]) -> QResult<QExp> {
         if args.len() == 1 {
@@ -2183,6 +3627,23 @@ pub fn fn_join_with(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return do_join_with(&item, &args);
 }
 
+/// Combine lists or strs element-wise, returning a list of lists containing
+/// elements drawn from each argument. The length of the returned list is
+/// limited to that of the shortest argument. strs are unpacked into lists of
+/// one character-long strs. If only a single list is passed, operates on the
+/// contents of the list instead of the list itself.
+/// Alias: `:~:`
+///
+/// Expected form:
+/// `(zip <lists or strs>...)`
+///
+/// Example:
+/// ```text
+/// q>> (zip (1 2) (3 4) (5 6 7)) ; evaluates to ((1 3 5) (2 4 6))
+/// q>> (zip ((1 3 5) (2 4 6))) ; evaluates to ((1 2) (3 4) (5 6))
+/// q>> (zip (0 1 2) "hello world") ; evaluates to ((0 "h") (1 "e") (2 "l"))
+/// ```
+#[builtin(name = "zip", alias = ":~:")]
 pub fn fn_zip(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn construct_zip(acc: &mut Vec<Vec<QExp>>, rest: &[QExp])
         -> QResult<()>
@@ -2225,6 +3686,21 @@ pub fn fn_zip(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return do_zip(&env.eval_multi(args)?);
 }
 
+/// Compute the Cartesian product of two or more lists or strs. The returned
+/// value is a list of lists. str arguments are unpacked into lists of one
+/// character-long strs. If only a single list is passed, operates on the
+/// contents of the list instead of the list itself.
+/// Alias: `:*:`
+///
+/// Expected form:
+/// `(cart <lists or strs>...)`
+///
+/// Example:
+/// ```text
+/// q>> (cart (1 2) (3 4) (5 6)) ; evaluates to ((1 3 5) (1 3 6) (1 4 5) [...])
+/// q>> (cart (1 2) "ab") ; evaluates to ((1 "a") (1 "b") (2 "a") (2 "b"))
+/// ```
+#[builtin(name = "cart", alias = ":*:")]
 pub fn fn_cart(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn do_cart(args: &[QExp]) -> QResult<QExp> {
         if args.len() == 1 {
@@ -2266,6 +3742,19 @@ pub fn fn_cart(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
  * iterable testing
  */
 
+/// Returns `true` if a given list or str contains a given item or substring.
+/// Alias: `*=`
+///
+/// Expected form:
+/// `(contains <list or str> <item or substring>)`
+///
+/// Example:
+/// ```text
+/// q>> (contains (range 0 10) 5) ; evaluates to true
+/// q>> (contains "hello world" "o w") ; evaluates to true
+/// q>> (contains "hello world" "a") ; evaluates to false
+/// ```
+#[builtin(name = "contains", alias = "*=")]
 pub fn fn_contains(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -2278,6 +3767,20 @@ pub fn fn_contains(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
         .map_err(|e| e.prepend_source("contains"));
 }
 
+/// Returns the index of the first occurrence of an item or substring in a list
+/// or str. If the list or str does not contain the element, -1 is returned.
+/// Alias: `#*=`
+///
+/// Expected form:
+/// `(index-of <list or str> <item or substring>)`
+///
+/// Example:
+/// ```text
+/// q>> (index-of (range 10 0) 9) ; evaluates to 1
+/// q>> (index-of "hello world" "l") ; evaluates to 2
+/// q>> (index-of "hello world" "a") ; evaluates to -1
+/// ```
+#[builtin(name = "index-of", alias = "#*=")]
 pub fn fn_index_of(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -2298,78 +3801,533 @@ pub fn fn_index_of(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
  */
 
 macro_rules! elementwise_fn(
-    ( $name:ident, $inner:ident, $method:ident ) => {
-        pub fn $name(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
-            fn $inner(args: &[QExp]) -> QResult<QExp> {
-                if args.len() == 1 {
-                    if let Some(qlist!(l)) = args.first() {
-                        return $inner(l);
-                    }
-                    return args.get(0).unwrap().$method();
-                } else {
-                    println!("{:?}", args);
-                    let new: Vec<QExp>
-                        = args.iter()
-                        .map(|x| x.$method())
-                        .collect::<QResult<Vec<QExp>>>()?;
-                    return Ok(qlist!(new));
+    ( $inner:ident, $method:ident ) => {
+        fn $inner(args: &[QExp]) -> QResult<QExp> {
+            if args.len() == 1 {
+                if let Some(qlist!(l)) = args.first() {
+                    return $inner(l);
                 }
+                return args.get(0).unwrap().$method();
+            } else {
+                let new: Vec<QExp>
+                    = args.iter()
+                    .map(|x| x.$method())
+                    .collect::<QResult<Vec<QExp>>>()?;
+                return Ok(qlist!(new));
             }
-            return $inner(&env.eval_multi(args)?);
         }
     }
 );
 
-elementwise_fn!(fn_neg,    do_neg,     neg  );
-elementwise_fn!(fn_recip,  do_recip,   recip);
-elementwise_fn!(fn_abs,    do_abs,     abs  );
-elementwise_fn!(fn_sqrt,   do_sqrt,    sqrt );
-elementwise_fn!(fn_cbrt,   do_cbrt,    cbrt );
-elementwise_fn!(fn_exp,    do_exp,     exp  );
-elementwise_fn!(fn_floor,  do_floor,   floor);
-elementwise_fn!(fn_ceil,   do_ceil,    ceil );
-elementwise_fn!(fn_round,  do_round,   round);
-elementwise_fn!(fn_ln,     do_ln,      ln   );
-elementwise_fn!(fn_sin,    do_sin,     sin  );
-elementwise_fn!(fn_cos,    do_cos,     cos  );
-elementwise_fn!(fn_tan,    do_tan,     tan  );
-elementwise_fn!(fn_asin,   do_asin,    asin );
-elementwise_fn!(fn_acos,   do_acos,    acos );
-elementwise_fn!(fn_atan,   do_atan,    atan );
-
-pub fn fn_atan2(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
-    fn do_atan2(args: &[QExp]) -> QResult<QExp> {
-        if args.len() == 1 {
-            if let Some(qlist!(l)) = args.first() {
-                if l.len() == 2 && l.first().unwrap().exp_type() != qlist!() {
-                    return args.first().unwrap().atan2();
-                } else {
-                    return do_atan2(l);
-                }
-            }
-            return args.get(0).unwrap().atan2();
-        } else {
-            let new: Vec<QExp>
-                = args.iter()
-                .map(|x| x.atan2())
-                .collect::<QResult<Vec<QExp>>>()?;
-            return Ok(qlist!(new));
-        }
-    }
-    return do_atan2(&env.eval_multi(args)?);
+/// Logical and arithmetic negative: For each input, returns the logical
+/// negation for booleans and additive inverse for other numerical types. If a
+/// single list is passed, operates on the contents of the list instead of the
+/// list itself.
+/// Alias: `!`
+///
+/// Expected form:
+/// `(neg <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (neg true) ; evaluates to false
+/// q>> (neg -5) ; evaluates to 5
+/// q>> (neg false 1.0546) ; evaluates to (true -1.0546)
+/// ```
+#[builtin(name = "neg", alias = "!")]
+pub fn fn_neg(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_neg,     neg     );
+    return do_neg(&env.eval_multi(args)?);
 }
 
-elementwise_fn!(fn_sinh,   do_sinh,    sinh );
-elementwise_fn!(fn_cosh,   do_cosh,    cosh );
-elementwise_fn!(fn_tanh,   do_tanh,    tanh );
-elementwise_fn!(fn_asinh,  do_asinh,   asinh);
-elementwise_fn!(fn_acosh,  do_acosh,   acosh);
-elementwise_fn!(fn_atanh,  do_atanh,   atanh);
-elementwise_fn!(fn_arg,    do_arg,     arg  );
-elementwise_fn!(fn_cis,    do_cis,     cis  );
-elementwise_fn!(fn_conj,   do_conj,    conj );
-elementwise_fn!(fn_real,   do_real,    real );
-elementwise_fn!(fn_imag,   do_imag,    imag );
+/// Scalar multiplicative inverse: For each input x, returns the multiplicative
+/// inverse 1/x. If a single list is passed, operates on the contents of the
+/// list instead of the list itself. Output values are always floats, complexes,
+/// or lists thereof.
+/// Alias: `1/`
+///
+/// Expected form:
+/// `(recip <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (recip 2) ; evaluates to 0.5
+/// q>> (recip 1+1i) ; evaluates to 0.5+0.5i
+/// ```
+#[builtin(name = "recip", alias = "1/")]
+pub fn fn_recip(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_recip,   recip   );
+    return do_recip(&env.eval_multi(args)?);
+}
+
+/// Absolute value operation for single numbers or a list of numbers. If a
+/// single list is passed, operates on the contents of the list instead of the
+/// list itself.
+/// Alias: `|.|`
+///
+/// Expected form:
+/// `(abs <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (abs -5) ; evaluates to 5
+/// q>> (abs (-4 3.2 3+4i)) ; evaluates to (4 3.2 5.0)
+/// ```
+#[builtin(name = "abs", alias = "|.|")]
+pub fn fn_abs(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_abs,     abs     );
+    return do_abs(&env.eval_multi(args)?);
+}
+
+/// Square-root operation for single numbers or a list of numbers. If a single
+/// list is passed, operates on the contents of the list instead of the list
+/// itself. Output values are always floats, complexes, or lists thereof.
+///
+/// Expected form:
+/// `(sqrt <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (sqrt 2) ; evaluates to 1.4142135623720951
+/// q>> (sqrt (-1 -1+0i)) ; evaluates to (NaN 0+1i)
+/// ```
+#[builtin(name = "sqrt")]
+pub fn fn_sqrt(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_sqrt,    sqrt    );
+    return do_sqrt(&env.eval_multi(args)?);
+}
+
+/// Cube-root operation for single numbers or a list of numbers. If a single
+/// list is passed, operates on the contents of the list instead of the list
+/// itself. Output values are always floats, complexes, or lists thereof.
+///
+/// Expected form:
+/// `(cbrt <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (cbrt 2) ; evaluates to 1.2599210498948734
+/// q>> (cbrt (-1 -1+0i)) ; evaluates to (-1, 0.5+0.8660254037844386i)
+/// ```
+#[builtin(name = "cbrt")]
+pub fn fn_cbrt(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_cbrt,    cbrt    );
+    return do_cbrt(&env.eval_multi(args)?);
+}
+
+/// Exponential function for single numbers or a list of numbers. If a single
+/// list is passed, operates on the contents of the list instead of the list
+/// itself. Output values are always floats, complexes, or lists thereof.
+/// Alias: `e**`
+///
+/// Expected form:
+/// `(exp <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (exp 1) ; evaluates to 2.718281828459045
+/// q>> (exp (* 1i PI)) ; evaluates to -1+0i
+/// ```
+#[builtin(name = "exp", alias = "e**")]
+pub fn fn_exp(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_exp,     exp     );
+    return do_exp(&env.eval_multi(args)?);
+}
+
+/// Floor operation for single numbers or a list of numbers. If a single list is
+/// passed, operates on the contents of the list instead of the list itself.
+/// Output values are always ints or lists thereof.
+/// Alias: `~_`
+///
+/// Expected form:
+/// `(floor <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (floor 5.2) ; evaluates to 5
+/// q>> (floor (2.25 -5.2 -7.9)) ; evaluates to (2 -6 -8)
+/// ```
+#[builtin(name = "floor", alias = "~_")]
+pub fn fn_floor(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_floor,   floor   );
+    return do_floor(&env.eval_multi(args)?);
+}
+
+/// Ceiling operation for single numbers or a list of numbers. If a single list
+/// is passed, operates on the contents of the list instead of the list itself.
+/// Output values are always ints or lists thereof.
+/// Alias: `~^`
+///
+/// Expected form:
+/// `(ceil <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (ceil 5.2) ; evaluates to 6
+/// q>> (ceil (2.25 -5.2 -7.9)) ; evaluates to (3 -5 -7)
+/// ```
+#[builtin(name = "ceil", alias = "~^")]
+pub fn fn_ceil(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_ceil,    ceil    );
+    return do_ceil(&env.eval_multi(args)?);
+}
+
+/// Round real numbers to the nearest integer. If a single list is passed,
+/// operates on the contents of the list instead of the list itself. Output
+/// values are always ints or lists thereof.
+/// Alias: `~:`
+///
+/// Expected form:
+/// `(round <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (round 5.5 6.5 -7.5) ; evaluates to (6 7 -8)
+/// q>> (round (4.2 -7.8 1.9) ; evaluates to (4 -8 2)
+/// ```
+#[builtin(name = "round", alias = "~:")]
+pub fn fn_round(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_round,   round   );
+    return do_round(&env.eval_multi(args)?);
+}
+
+/// Natural logarithm function. For complex input z, this function satisfies
+///     -π ≤ arg(ln(z)) ≤ π.
+/// If a single list is passed, operates on the contents of the list instead of
+/// the list itself. Outputs are always floats, complexes, or lists thereof.
+///
+/// Expected form:
+/// `(ln <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (ln 2) ; evaluates to 0.6931471805599453
+/// q>> (ln 1j) ; evaluates to 0+1.5707963267948966i
+/// q>> (ln (1 2j)) ; evaluates to (0 0.6931471805599453+1.5707963267948966i)
+/// ```
+#[builtin(name = "ln")]
+pub fn fn_ln(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_ln,      ln      );
+    return do_ln(&env.eval_multi(args)?);
+}
+
+/// Sine function. If a single list is passed, operates on the contents of the
+/// list instead of the list itself. Outputs are always floats, complexes, or
+/// lists thereof.
+///
+/// Expected form:
+/// `(sin <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (sin (0 (/ PI 2))) ; evaluates to (0 1)
+/// ```
+#[builtin(name = "sin")]
+pub fn fn_sin(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_sin,     sin     );
+    return do_sin(&env.eval_multi(args)?);
+}
+
+/// Cosine function. If a single list is passed, operates on the contents of the
+/// list instead of the list itself. Outputs are always floats, complexes, or
+/// lists thereof.
+///
+/// Expected form:
+/// `(cos <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (cos (0 (/ PI 2))) ; evaluates to (1 0)
+/// ```
+#[builtin(name = "cos")]
+pub fn fn_cos(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_cos,     cos     );
+    return do_cos(&env.eval_multi(args)?);
+}
+
+/// Tangent function. If a single list is passed, operates on the contents of
+/// the list instead of the list itself. Outputs are always floats, complexes,
+/// or lists thereof.
+///
+/// Expected form:
+/// `(tan <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (tan (0 (/ PI 4))) ; evaluates to (0 1)
+/// ```
+#[builtin(name = "tan")]
+pub fn fn_tan(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_tan,     tan     );
+    return do_tan(&env.eval_multi(args)?);
+}
+
+/// Arcsine function. If a single list is passed, operates on the contents of
+/// the list instead of the list itself. Outputs are always floats, complexes,
+/// or lists thereof.
+/// Alias: `asin`
+///
+/// Expected form:
+/// `(arcsin <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (arcsin (0 1)) ; evaluates to (0 1.5707963267948966)
+/// ```
+#[builtin(name = "arcsin", alias = "asin")]
+pub fn fn_arcsin(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_arcsin,  arcsin  );
+    return do_arcsin(&env.eval_multi(args)?);
+}
+
+/// Arccosine function. If a single list is passed, operates on the contents of
+/// the list instead of the list itself. Outputs are always floats, complexes,
+/// or lists thereof.
+/// Alias: `acos`
+///
+/// Expected form:
+/// `(arccos <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (arccos (0 1)) ; evaluates to (1.5707963267948966 0)
+/// ```
+#[builtin(name = "arccos", alias = "acos")]
+pub fn fn_arccos(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_arccos,  arccos  );
+    return do_arccos(&env.eval_multi(args)?);
+}
+
+/// Arctangent function. If a single list is passed, operates on the contents of
+/// the list instead of the list itself. Outputs are always floats, complexes,
+/// or lists thereof.
+/// Alias: `atan`
+///
+/// Expected form:
+/// `(arctan <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (arctan (0 1)) ; evaluates to (0 0.7853981633974483)
+/// ```
+#[builtin(name = "arctan", alias = "atan")]
+pub fn fn_arctan(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_arctan,  arctan  );
+    return do_arctan(&env.eval_multi(args)?);
+}
+
+/// Four-quadrant arctangent function. Expects arguments to be two-item lists
+/// with the first being the y-coordinate. If a single list of length not equal
+/// to 2 is passed, operates on the contents of the list instead of the list
+/// itself. Outputs are always floats, complexes, or lists thereof.
+/// Alias: `atan2`
+///
+/// Expected form:
+/// `(arctan2 <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (arctan2 (1 1)) ; evaluates to 0.7853981633974483
+/// q>> (arctan2 (-1 -1)) ; evaluates to -2.356194490192345
+/// ```
+#[builtin(name = "arctan2", alias = "atan2")]
+pub fn fn_arctan2(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_arctan2, arctan2 );
+    return do_arctan2(&env.eval_multi(args)?);
+}
+
+/// Hyperbolic sine function. If a single list is passed, operates on the
+/// contents of the list instead of the the list itself. Outputs are always
+/// floats, complexes, or lists thereof.
+///
+/// Expected form:
+/// `(sinh <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (sinh (0 1)) ; evaluates to (0 1.1752011936438014)
+/// ```
+#[builtin(name = "sinh")]
+pub fn fn_sinh(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_sinh,    sinh    );
+    return do_sinh(&env.eval_multi(args)?);
+}
+
+/// Hyperbolic cosine function. If a single list is passed, operates on the
+/// contents of the list instead of the list itself. Outputs are always floats,
+/// complexes, or lists thereof.
+///
+/// Expected form:
+/// `(cosh <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (cosh (0 1)) ; evaluates to (1 1.5430806348152437)
+/// ```
+#[builtin(name = "cosh")]
+pub fn fn_cosh(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_cosh,    cosh    );
+    return do_cosh(&env.eval_multi(args)?);
+}
+
+/// Hyperbolic tangent function. If a single list is passed, operates on the
+/// contents of the list instead of the list itself. Outputs are always floats,
+/// complexes, or lists thereof.
+///
+/// Expected form:
+/// `(tanh <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (tanh (0 1)) ; evaluates to (0 0.7615941559557649)
+/// ```
+#[builtin(name = "tanh")]
+pub fn fn_tanh(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_tanh,    tanh    );
+    return do_tanh(&env.eval_multi(args)?);
+}
+
+/// Area hyperbolic sine function. If a single list is passed, operates on the
+/// contents of the list instead of the list itself. Outputs are always floats,
+/// complexes, or lists thereof.
+/// Alias: `asinh`
+///
+/// Expected form:
+/// `(arsinh <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (arsinh (0 1)) ; evaluates to (0 0.8813735870195429)
+/// ```
+#[builtin(name = "arsinh", alias = "asinh")]
+pub fn fn_arsinh(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_arsinh,  arsinh  );
+    return do_arsinh(&env.eval_multi(args)?);
+}
+
+/// Area hyperbolic cosine function. If a single list is passed, operates on the
+/// contents of the list instead of the list itself. Outputs are always floats,
+/// complexes, or lists thereof.
+/// Alias: `acosh`
+///
+/// Expected form:
+/// `(arcosh <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (arcosh (0 1)) ; evaluates to (NaN 0)
+/// ```
+#[builtin(name = "arcosh", alias = "acosh")]
+pub fn fn_arcosh(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_arcosh,  arcosh  );
+    return do_arcosh(&env.eval_multi(args)?);
+}
+
+/// Area hyperbolic tangent function. If a single list is passed, operates on
+/// the contents of the list instead of the list itself. Outputs are always
+/// floats, complexes, or lists thereof.
+/// Alias: `atanh`
+///
+/// Expected form:
+/// `(artanh <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (artanh (0 1)) ; evaluates to (0 inf)
+/// ```
+#[builtin(name = "artanh", alias = "atanh")]
+pub fn fn_artanh(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_artanh,  artanh  );
+    return do_artanh(&env.eval_multi(args)?);
+}
+
+/// Returns the argument (polar angle) of a complex number. Returned values are
+/// restricted to the range (-π, +π]. If a single list is passed, operates on
+/// the contents of the list instead of the list itself. Outputs are always
+/// floats or lists thereof.
+///
+/// Expected form:
+/// `(arg <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (arg 1i) ; evaluates to 1.5707963267948966
+/// q>> (arg (0 -1)) ; evaluates to (NaN 3.141592653589793)
+/// ```
+#[builtin(name = "arg")]
+pub fn fn_arg(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_arg,     arg     );
+    return do_arg(&env.eval_multi(args)?);
+}
+
+/// Cis (cosine-i-sine) function. If a single list is passed, operates on the
+/// contents of the list instead of the list itself. Outputs are always
+/// complexes or lists thereof.
+/// Alias: `e**i`
+///
+/// Expected form:
+/// `(cis <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (cis (0 (/ PI 2) PI)) ; evaluates to (1+0i 0+1i -1+0i)
+/// ```
+#[builtin(name = "cis", alias = "e**i")]
+pub fn fn_cis(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_cis,     cis     );
+    return do_cis(&env.eval_multi(args)?);
+}
+
+/// Complex conjugate operation. If a single list is passed, operates on the
+/// contents of the list instead of the list itself.
+/// Alias: `~z`
+///
+/// Expected form:
+/// `(conj <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (conj (1+1i 5)) ; evaluates to (1-1i 5)
+/// ```
+#[builtin(name = "conj", alias = "~z")]
+pub fn fn_conj(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_conj,    conj    );
+    return do_conj(&env.eval_multi(args)?);
+}
+
+/// Get the real part of a number. If a single list is passed, operates on the
+/// contents of the list instead of the list itself.
+/// Alias: `Re`
+///
+/// Expected form:
+/// `(real <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (real (1+1i 1+2i 2+2i)) ; evaluates to (1.0 1.0 2.0)
+/// ```
+#[builtin(name = "read", lias = "Re")]
+pub fn fn_real(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_real,    real    );
+    return do_real(&env.eval_multi(args)?);
+}
+
+/// Get the imaginary part of a number. If a single list is passed, operates on
+/// the contents of the list instead of the list itself.
+/// Alias: `Im`
+///
+/// Expected form:
+/// `(imag <values>...)`
+///
+/// Example:
+/// ```text
+/// q>> (imag (1+1i 1+2i 2+2i)) ; evaluates to (1.0 2.0 2.0)
+/// ```
+#[builtin(name = "imag", alias = "Im")]
+pub fn fn_imag(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    elementwise_fn!(do_imag,    imag    );
+    return do_imag(&env.eval_multi(args)?);
+}
 
 /*
  * parameterized element-wise math
@@ -2377,7 +4335,7 @@ elementwise_fn!(fn_imag,   do_imag,    imag );
 
 macro_rules! param_elementwise_fn(
     (
-        $name:ident,
+        $inner_fn:ident,
         $err_prepend:literal,
         $elem_arg:literal,
         $param_arg:literal,
@@ -2385,7 +4343,7 @@ macro_rules! param_elementwise_fn(
         $min_type:expr,
         $max_type:expr
     ) => {
-        pub fn $name(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+        fn $inner_fn(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
             if args.len() != 2 {
                 return Err(
                     qerr_fmt!("expected two arguments but got {}", args.len())
@@ -2473,16 +4431,164 @@ macro_rules! param_elementwise_fn(
     }
 );
 
-param_elementwise_fn!(fn_mod,   "mod",  0,  1,  modulo, qint!(),    qfloat!()  );
-param_elementwise_fn!(fn_log,   "log",  1,  0,  log,    qint!(),    qcomplex!());
-param_elementwise_fn!(fn_pow,   "pow",  0,  1,  pow,    qint!(),    qcomplex!());
-param_elementwise_fn!(fn_shl,   "shl",  0,  1,  shl,    qbool!(),   qint!()    );
-param_elementwise_fn!(fn_shr,   "shr",  0,  1,  shr,    qbool!(),   qint!()    );
+/// Modulo operator for single numbers or lists of numbers. Returned values are
+/// non-negative.
+/// Alias: `%`
+///
+/// Expected form:
+/// `(mod <value> <modulo>)`
+///
+/// Example:
+/// ```text
+/// q>> (mod -5.5 2.5) ; evaluates to 2.0
+/// q>> (mod (range 5 15) 10) ; evaluates to (5 6 7 8 9 0 1 2 3 4)
+/// q>> (mod 10 (range 5 15)) ; evaluates to (0 4 3 2 1 0 10 10 10 10)
+/// q>> (mod (3 4 5) (3 4 5)) ; evluates to (0 0 0)
+/// ```
+#[builtin(name = "mod", alias = "%")]
+pub fn fn_mod(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    param_elementwise_fn!(
+        do_mod,
+        "mod",
+        0,
+        1,
+        modulo,
+        qint!(),
+        qfloat!()
+    );
+    return do_mod(env, args);
+}
+
+/// Logarithm operation for single numbers or lists of numbers. Returned values
+/// are always floats, complexes, or lists thereof.
+///
+/// Expected form:
+/// `(log <base> <value>)`
+///
+/// Example:
+/// ```text
+/// q>> (log 2 128) ; evaluates to 7.0
+/// q>> (log 2 (1 2 4 8 16 32)) ; evaluates to (0.0 1.0 2.0 3.0 4.0 5.0)
+/// q>> (log (2 E 10) 100) ; evaluates to (6.64385618977, 4.60517018598, 2)
+/// q>> (log (4 5 6) (4 5 6)) ; evaluates to (1.0 1.0 1.0)
+/// ```
+#[builtin(name = "log")]
+pub fn fn_log(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    param_elementwise_fn!(
+        do_log,
+        "log",
+        1,
+        0,
+        log,
+        qint!(),
+        qcomplex!()
+    );
+    return do_log(env, args);
+}
+
+/// Exponentiation with arbitrary base.
+/// Alias: `**`
+///
+/// Expected form:
+/// `(pow <base> <exponent>)`
+///
+/// Example:
+/// ```text
+/// q>> (pow 2 8) ; evaluates to 256
+/// q>> (pow 2 (0 1 2 3 4 5)) ; evaluates to (1 2 4 8 16 32)
+/// q>> (pow (1 2 3 4 5) 2) ; evaluates to (1 4 9 16 25)
+/// q>> (pow (1 2 3 4) (1 2 3 4)) ; evaluates to (1 4 27 256)
+/// ```
+#[builtin(name = "pow", alias = "**")]
+pub fn fn_pow(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    param_elementwise_fn!(
+        do_pow,
+        "pow",
+        0,
+        1,
+        pow,
+        qint!(),
+        qcomplex!()
+    );
+    return do_pow(env, args);
+}
+
+/// Bit-shift left for single numbers or lists of numbers. Overflow is prevented
+/// by automatically reducing the shift size mod 64. Arguments must be bools,
+/// ints, or lists thereof.
+/// Alias: `<<`
+///
+/// Expected form:
+/// `(shl <value> <shift size>)`
+///
+/// Example:
+/// ```text
+/// q>> (shl 1 7) ; evaluates to 128
+/// q>> (shl 1 (1 2 3 4 5)) ; evaluates to (2 4 8 16 32)
+/// q>> (shl (1 2 3 4 5) 2) ; evaluates to (4 8 12 16 20)
+/// q>> (shl (1 2 3 4 5) (1 2 3 4 5)) ; evaluates to (2 8 24 64 160)
+/// ```
+#[builtin(name = "shl", alias = "<<")]
+pub fn fn_shl(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    param_elementwise_fn!(
+        do_shl,
+        "shl",
+        0,
+        1,
+        shl,
+        qbool!(),
+        qint!()
+    );
+    return do_shl(env, args);
+}
+
+/// Bit-shift right for single numbers or lists of numbers. Overflow is
+/// prevented by automatically reducing the shift size mod 64. Arguments must be
+/// bools, ints, or lists thereof.
+/// Alias: `>>`
+///
+/// Expected form:
+/// `(shr <value> <shift size>)`
+///
+/// Example:
+/// ```text
+/// q>> (shr 128 7) ; evaluates to 1
+/// q>> (shr 128 (1 2 3 4 5)) ; evaluates to (64 32 16 8 4)
+/// q>> (shr (16 32 64 128 256) 2) ; evaluates to (4 8 16 32 64)
+/// q>> (shr (16 32 64 128 256) (4 5 6 7 8)) ; evaluates to (1 1 1 1 1)
+/// ```
+#[builtin(name = "shr", alias = ">>")]
+pub fn fn_shr(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
+    param_elementwise_fn!(
+        do_shr,
+        "shr",
+        0,
+        1,
+        shr,
+        qbool!(),
+        qint!()
+    );
+    return do_shr(env, args);
+}
 
 /*
  * list -> list math
  */
 
+/// Discrete-valued convolution operation between two lists of numbers. Returns
+/// values obtained from all points of non-zero overlap; the returned list
+/// contains N + M - 1 values, where N and M are the lengths of the two argument
+/// lists.
+/// Alias: `<:>`
+///
+/// Expected form:
+/// `(convolve <list1> <list2>)`
+///
+/// Example:
+/// ```test
+/// q>> (convolve (1 2 3 4 5) (6 7 8)) ; evaluates to (6 19 40 61 82 67 40)
+/// ```
+#[builtin(name = "convolve", alias = "<:>")]
 pub fn fn_convolve(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -2517,6 +4623,19 @@ pub fn fn_convolve(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return Ok(qlist!(ret));
 }
 
+/// Count elements of a data set in a histogram. Returns a list containing pairs
+/// where, in each pair, the first element is a value and the second is the
+/// number of times it occurs in the data set.
+/// Alias: `|#|`
+///
+/// Expected form:
+/// `(hist <data>)`
+///
+/// Example:
+/// ```text
+/// q>> (hist ("a" "b" "c" "a")) ; evaluates to (("a" 2) ("b" 1) ("c" 1))
+/// ```
+#[builtin(name = "hist", alias = "|#|")]
 pub fn fn_histogram(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn index_of(vals: &[QExp], item: &QExp) -> Option<usize> {
         for (k, it) in vals.iter().enumerate() {
@@ -2553,6 +4672,21 @@ pub fn fn_histogram(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     ));
 }
 
+/// Count elements of a data set as probabilities in a histogram. Returns a list
+/// containins pairs where, in each pair, the first element is a value and the
+/// second is the number of times it occurs in the data set, normalized to the
+/// length of the data set.
+/// Alias: `|p|`
+///
+/// Expected form:
+/// `(hist-prob <data>)`
+///
+/// Example:
+/// ```text
+/// q>> (hist-prob ("a" "b" "c" "a"))
+/// q>> ; evaluates to (("a" 0.5) ("b" 0.25) ("c" 0.25))
+/// ```
+#[builtin(name = "hist-prob", alias = "|p|")]
 pub fn fn_histogram_prob(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn index_of(vals: &[QExp], item: &QExp) -> Option<usize> {
         for (k, it) in vals.iter().enumerate() {
@@ -2590,6 +4724,19 @@ pub fn fn_histogram_prob(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     ));
 }
 
+/// Calculates the NxN covariance matrix for N-dimensional data, passed as a
+/// list of N-item lists of numbers.
+/// Alias: `Cov`
+///
+/// Expected form:
+/// `(covariance <data>)`
+///
+/// Example:
+/// ```text
+/// q>> (covariance ((1 2) (1 1) (2 5) (2 4)))
+/// q>> ; evaluates to ((0.25 0.75) (0.75 2.5))
+/// ```
+#[builtin(name = "covariance", alias = "Cov")]
 pub fn fn_covariance(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn mean_qexp<'a, I>(vals: I, ret_type: QExpType) -> QResult<QExp>
     where I: IntoIterator<Item = &'a QExp>
@@ -2676,6 +4823,19 @@ pub fn fn_covariance(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return Ok(qlist!(covar.into_iter().map(|ci| qlist!(ci)).collect()));
 }
 
+/// Calculates the NxN Pearson correlation matrix for N-dimensional data, passed
+/// as a list of N-item lists of numbers.
+/// Alias: `Corr`
+///
+/// Expected form:
+/// `(correlation <data>)`
+///
+/// Example:
+/// ```text
+/// q>> (correlation ((1 2) (1 1) (2 5) (2 4)))
+/// q>> ; evaluates to ((1 0.948) (0.948 1))
+/// ```
+#[builtin(name = "correlation", alias = "Corr")]
 pub fn fn_correlation(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn mean_qexp<'a, I>(vals: I, ret_type: QExpType) -> QResult<QExp>
     where I: IntoIterator<Item = &'a QExp>
@@ -2794,6 +4954,16 @@ pub fn fn_correlation(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
  * many/list -> value math
  */
 
+/// Finds the mean of a (scalar) data set.
+///
+/// Expected form:
+/// `(mean <data>)`
+///
+/// Example:
+/// ```text
+/// q>> (mean (1 6 3 5 7 9 0 4 2 6 4 3 7)) ; evaluates to 4.384615384615385
+/// ```
+#[builtin(name = "mean")]
 pub fn fn_mean(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn do_mean(args: &[QExp]) -> QResult<QExp> {
         if args.len() == 1 {
@@ -2813,6 +4983,17 @@ pub fn fn_mean(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return do_mean(&env.eval_multi(args)?);
 }
 
+/// Finds the variance of a (scalar) data set.
+/// Alias: `Var`
+///
+/// Expected form:
+/// `(variance <data>)`
+///
+/// Example:
+/// ```text
+/// q>> (variance (1 6 3 5 7 9 0 4 2 6 4 3 7)) ; evaluates to 6.236686390532544
+/// ```
+#[builtin(name = "variance", alias = "Var")]
 pub fn fn_variance(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn do_variance(args: &[QExp]) -> QResult<QExp> {
         if args.len() == 1 {
@@ -2839,6 +5020,17 @@ pub fn fn_variance(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     return do_variance(&env.eval_multi(args)?);
 }
 
+/// Finds the standard deviation of a (scalar) data set.
+/// Alias: `Std`
+///
+/// Expected form:
+/// `(stddev <data>)`
+///
+/// Example:
+/// ```text
+/// q>> (stddev (1 6 3 5 7 9 0 4 2 6 4 3 7)) ; evaluates to 2.497335858576604
+/// ```
+#[builtin(name = "stddev", alias = "Std")]
 pub fn fn_stddev(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn do_stddev(args: &[QExp]) -> QResult<QExp> {
         if args.len() == 1 {
@@ -2870,6 +5062,19 @@ pub fn fn_stddev(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
  * parameterized list -> value math
  */
 
+/// Finds the p-norm of an N-dimensional value (passed as a list of numbers) for
+/// given p.
+/// Alias: `|+|`
+///
+/// Expected form:
+/// `(pnorm <p> <value>)`
+///
+/// Example:
+/// ```text
+/// q>> (pnorm 2 (3 4)) ; evaluates to 5.0
+/// q>> (pnorm 1 (3 4)) ; evaluates to 7.0
+/// ```
+#[builtin(name = "pnorm", alias = "|+|")]
 pub fn fn_pnorm(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -2900,6 +5105,18 @@ pub fn fn_pnorm(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     }
 }
 
+/// Finds the N-th moment of a (scalar) data set for given N.
+///
+/// Expected form:
+/// `(moment <N> <data>)`
+///
+/// Example:
+/// ```text
+/// q>> (moment 0 (1 6 3 5 7 9 0 4 2 6 4 3 7)) ; evaluates to 1.0
+/// q>> (moment 1 (1 6 3 5 7 9 0 4 2 6 4 3 7)) ; evaluates to 4.384615384615385
+/// q>> (moment 2 (1 6 3 5 7 9 0 4 2 6 4 3 7)) ; evaluates to 25.46153846153846
+/// ```
+#[builtin(name = "moment")]
 pub fn fn_moment(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -2933,6 +5150,12 @@ pub fn fn_moment(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
  * phys module
  */
 
+/// Convert a wavelength (in nm) to a three-element, RGB color list, with each
+/// component's intensity on a [0, 255] scale.
+///
+/// Expected form:
+/// `(phys::nmrgb <wavelengths>...)`
+#[builtin(name = "nmrgb")]
 pub fn phys_nmrgb(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     fn do_nmrgb(nm: f64) -> (f64, f64, f64) {
         const gamma: f64 = 0.80;
@@ -2994,6 +5217,11 @@ pub fn phys_nmrgb(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     };
 }
 
+/// Compute the coefficient generated by the raising operator.
+///
+/// Expected form:
+/// `(phys::qraise <J> <mJ>)`
+#[builtin(name = "qraise")]
 pub fn phys_qraise(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
@@ -3016,6 +5244,11 @@ pub fn phys_qraise(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     };
 }
 
+/// Compute the coefficient generated by the lowering operator.
+///
+/// Expected form:
+/// `(phys::qlower <J> <mJ>)`
+#[builtin(name = "qlower")]
 pub fn phys_qlower(env: &mut QEnv, args: &[QExp]) -> QResult<QExp> {
     if args.len() != 2 {
         return Err(qerr_fmt!(
